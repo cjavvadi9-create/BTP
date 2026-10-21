@@ -1,0 +1,13 @@
+# Python environments and bytecode
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Local data caches and generated model artifacts
+data/pdb/
+*.pth
+*.pt
+*.ckpt
+*.log
+result_*.csv
