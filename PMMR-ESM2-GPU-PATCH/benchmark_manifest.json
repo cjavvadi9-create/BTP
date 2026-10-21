@@ -1,0 +1,1 @@
+{"source":"PMMR-main.zip","dataset":"PDB","invalid_smiles_removed":893,"reason":"RDKit MolFromSmiles returned None; original loader crashes on these rows","feature_assets":"original archive: mol_dict.pkl, ESM-2 embeddings, AlphaFold structure node/adjacency arrays"}

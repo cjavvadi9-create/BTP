@@ -1,0 +1,7 @@
+{
+  "missing_initial": 5610,
+  "generated": 5610,
+  "failures": [],
+  "model": "esm2_t12_35M_UR50D",
+  "max_len": 1022
+}
