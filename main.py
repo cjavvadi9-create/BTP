@@ -245,11 +245,12 @@ def run(args: argparse.Namespace):
             train_dti(model, loss_fn, train_loader, optimizer, epoch + 1)
             y_true, y_scores = predicting_dti(model, test_loader)
 
+            y_prob = torch.softmax(torch.tensor(y_scores), dim=1)[:, 1].numpy()
             y_pred = np.argmax(y_scores, axis=1)
-            precision, recall, _ = precision_recall_curve(y_true, y_pred)
+            precision, recall, _ = precision_recall_curve(y_true, y_prob)
             aupr = auc(recall, precision)
 
-            fpr, tpr, _ = roc_curve(y_true, y_pred)
+            fpr, tpr, _ = roc_curve(y_true, y_prob)
             auroc = auc(fpr, tpr)
 
             f1 = f1_score(y_true, y_pred)
