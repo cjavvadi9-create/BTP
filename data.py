@@ -153,7 +153,7 @@ if __name__ == "__main__":
 
     print('Test Batch:')
     for batch in train_loader:
-        print('aaaaaaaaaaaa')
+        print('Test Batch Item:')
         print('Compound Node Feature Shape:', batch['COMPOUND_NODE_FEAT'].shape)
         print('Compound Adjacency Matrix Shape:', batch['COMPOUND_ADJ'].shape)
         print('Compound Node Numbers Shape:', batch['COMPOUND_NODE_NUM'].shape)

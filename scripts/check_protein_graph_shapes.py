@@ -1,7 +1,7 @@
 """
 scripts/check_protein_graph_shapes.py
 --------------------------------------
-Smoke-test for the full PMMR feature pipeline.
+Smoke-test for the full BiSSA feature pipeline.
 
 Run from the repo root:
     python scripts/check_protein_graph_shapes.py [--dataset pdb]
@@ -9,7 +9,7 @@ Run from the repo root:
 Checks performed
   1. CPIDataset single-item shapes for all keys
   2. collate_fn batch shapes for all keys
-  3. PMMRNet forward() on that batch (catches wiring / dimension mismatches)
+  3. BiSSANet forward() on that batch (catches wiring / dimension mismatches)
 
 Exit code 0 = all shapes look correct and the forward pass completed.
 Exit code 1 = a shape mismatch or runtime error was caught.
@@ -30,7 +30,7 @@ import torch
 from torch.utils.data import DataLoader
 
 from data import CPIDataset
-from models.core import PMMRNet
+from models.core import BiSSANet
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -84,7 +84,7 @@ def build_args(dataset='pdb') -> argparse.Namespace:
 # ── main ─────────────────────────────────────────────────────────────────────
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="PMMR pipeline smoke test")
+    parser = argparse.ArgumentParser(description="BiSSA pipeline smoke test")
     parser.add_argument('--dataset', type=str, default='pdb',
                         help='Dataset to test (pdb, davis, bindingdb, etc.)')
     parser.add_argument('--data_root', type=str, default=None,
@@ -264,9 +264,9 @@ def main() -> int:
         print(f"  {PASS}  PROTEIN_ADJ is [B, L_struct, L_struct]")
 
     # ------------------------------------------------------------------
-    # 4. PMMRNet forward pass
+    # 4. BiSSANet forward pass
     # ------------------------------------------------------------------
-    section("4 · PMMRNet forward pass")
+    section("4 · BiSSANet forward pass")
 
     if not torch.cuda.is_available():
         print(f"  ⚠  CUDA not available — skipping forward pass "
@@ -278,11 +278,11 @@ def main() -> int:
 
     try:
         args  = build_args()
-        model = PMMRNet(args).cuda()
+        model = BiSSANet(args).cuda()
         model.eval()
-        print(f"  {PASS}  PMMRNet instantiated")
+        print(f"  {PASS}  BiSSANet instantiated")
     except Exception as exc:
-        print(f"  {FAIL}  PMMRNet init failed: {exc}")
+        print(f"  {FAIL}  BiSSANet init failed: {exc}")
         traceback.print_exc()
         return 1
 

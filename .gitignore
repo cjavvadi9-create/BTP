@@ -11,3 +11,4 @@ __pycache__/
 *.ckpt
 *.log
 result_*.csv
+*.smoke_test_ignored.*

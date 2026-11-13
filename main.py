@@ -13,7 +13,6 @@ import torch.backends.cudnn as cudnn
 from sklearn.metrics import auc
 from sklearn.metrics import RocCurveDisplay
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1,2,3'
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # training function at each epoch
@@ -179,7 +178,7 @@ def run(args: argparse.Namespace):
     NUM_EPOCHS = args.max_epochs
     seed = args.seed
 
-    model = PMMRNet(args).to(device)
+    model = BiSSANet(args).to(device)
 
 
     print('Learning rate: ', LR)
@@ -285,7 +284,7 @@ def parse_args():
                         help='Objective (classification / regression)')
     parser.add_argument('--seed', type=int, default=0, help='Random Seed')
     parser.add_argument('--batch_size', type=int, default=128, help='Batch Size for Train(Validation/Test)')
-    parser.add_argument('--max_epochs', type=int, default=200, help='Max Trainning Epochs')
+    parser.add_argument('--max_epochs', type=int, default=200, help='Max Training Epochs')
     parser.add_argument('--num_workers', type=int, default=4, help='Number of Subprocesses for Data Loading')
     parser.add_argument('--learning_rate', type=float, default=1e-3, help='Learning Rate for Trainning')
     parser.add_argument('--decoder_layers', type=int, default=2, help='Number of stacked DecoderLayer blocks in the drug and protein fusion decoders')

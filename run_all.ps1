@@ -1,5 +1,5 @@
 $ErrorActionPreference = "Stop"
-$python = "C:/Users/CHARAN SUBHASH/AppData/Local/Python/bin/python.exe"
+$python = "python"
 
 Write-Output "Running protein_dta.py..."
 & $python preprocessing/protein_pretrain/protein_dta.py --root_data_path data --dataset pdb
