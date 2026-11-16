@@ -19,10 +19,16 @@ def _load_chemberta():
     global _tokenizer, _model
     if _tokenizer is None:
         print("Loading ChemBERTa-77M-MLM model...")
-        _tokenizer = AutoTokenizer.from_pretrained("DeepChem/ChemBERTa-77M-MLM")
-        _model = RobertaModel.from_pretrained("DeepChem/ChemBERTa-77M-MLM")
-        _model.eval()
-        print("ChemBERTa model loaded.")
+        try:
+            _tokenizer = AutoTokenizer.from_pretrained("DeepChem/ChemBERTa-77M-MLM")
+            _model = RobertaModel.from_pretrained("DeepChem/ChemBERTa-77M-MLM")
+            _model.eval()
+            print("ChemBERTa model loaded.")
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load pretrained ChemBERTa model 'DeepChem/ChemBERTa-77M-MLM': {e}. "
+                "Ensure network access or pre-downloaded weights are present. Never fall back to random weights."
+            ) from e
     return _tokenizer, _model
 
 

@@ -50,10 +50,33 @@ def one_of_k_encoding_unk(x, allowable_set):
     return list(map(lambda s: x == s, allowable_set))
 
 
-def smile_to_graph(smile):
+INVALID_SMILES_LOG = []
+
+
+def get_invalid_smiles_log():
+    return list(INVALID_SMILES_LOG)
+
+
+def clear_invalid_smiles_log():
+    INVALID_SMILES_LOG.clear()
+
+
+def smile_to_graph(smile, strict=False):
+    global INVALID_SMILES_LOG
+    if not RDKIT_AVAILABLE:
+        msg = f"RDKit is unavailable ({_RDKIT_IMPORT_ERROR}). Cannot parse SMILES: '{smile}'"
+        if strict:
+            raise RuntimeError(msg)
+        INVALID_SMILES_LOG.append({'smiles': smile, 'reason': msg})
+        return np.zeros((1, 78), dtype=np.float32), np.eye(1, dtype=np.float32)
+
     mol = Chem.MolFromSmiles(smile)
     if mol is None:
-        return np.zeros((1, 44+11+11+11+1)), np.zeros((1, 1))
+        msg = f"Invalid SMILES string encountered: '{smile}' (RDKit MolFromSmiles returned None)"
+        if strict:
+            raise ValueError(msg)
+        INVALID_SMILES_LOG.append({'smiles': smile, 'reason': msg})
+        return np.zeros((1, 78), dtype=np.float32), np.eye(1, dtype=np.float32)
 
     features = []
 
@@ -63,19 +86,15 @@ def smile_to_graph(smile):
 
     adj = adjacent_matrix(mol)
 
-    return features, adj
+    return np.array(features, dtype=np.float32), adj
 
 def adjacent_matrix(mol):
     adjacency = Chem.GetAdjacencyMatrix(mol)
-    return np.array(adjacency) + np.eye(adjacency.shape[0])
+    return np.array(adjacency, dtype=np.float32) + np.eye(adjacency.shape[0], dtype=np.float32)
 
-def get_mol_features(smiles):
-    features, adj = smile_to_graph(smiles)
-
-    features = np.array(features)
-
-
-    return features,adj
+def get_mol_features(smiles, strict=False):
+    features, adj = smile_to_graph(smiles, strict=strict)
+    return np.array(features, dtype=np.float32), adj
 
 
 

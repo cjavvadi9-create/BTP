@@ -87,7 +87,7 @@ def predicting_dti(model, loader):
     return np.concatenate(total_labels), np.concatenate(total_preds)
 
 
-def davis_dataloader(seed=0, batch_size=128, workers=4, dataset='davis', data_path='./data', split='random', dedup='none'):
+def davis_dataloader(seed=0, batch_size=128, workers=4, dataset='davis', data_path='./data', split='random', dedup='none', strict=False):
     print(f'\nrunning on {dataset} with split: {split}, dedup: {dedup}')
 
     path = data_path + '/' + dataset
@@ -97,9 +97,9 @@ def davis_dataloader(seed=0, batch_size=128, workers=4, dataset='davis', data_pa
     if dedup == 'train':
         folds['train'], _ = deduplicate_train_against_eval(folds['train'], [folds['valid'], folds['test']])
 
-    train_dataset = CPIDataset(folds['train'], f'{path}/compound', f'{path}/protein')
-    val_dataset = CPIDataset(folds['valid'], f'{path}/compound', f'{path}/protein')
-    test_dataset = CPIDataset(folds['test'], f'{path}/compound', f'{path}/protein')
+    train_dataset = CPIDataset(folds['train'], f'{path}/compound', f'{path}/protein', strict=strict)
+    val_dataset = CPIDataset(folds['valid'], f'{path}/compound', f'{path}/protein', strict=strict)
+    test_dataset = CPIDataset(folds['test'], f'{path}/compound', f'{path}/protein', strict=strict)
 
     train_loader = DataLoader(
         train_dataset,
@@ -133,7 +133,7 @@ def davis_dataloader(seed=0, batch_size=128, workers=4, dataset='davis', data_pa
 
     return train_loader, val_loader, test_loader
 
-def others_dataloader(batch_size, workers, dataset='pdb', data_path='./data', seed=0, val_frac=0.1, dedup='none'):
+def others_dataloader(batch_size, workers, dataset='pdb', data_path='./data', seed=0, val_frac=0.1, dedup='none', strict=False):
     print(f'\nrunning on {dataset} (val_frac={val_frac}, dedup={dedup})')
 
     path = data_path + '/' + dataset
@@ -152,9 +152,9 @@ def others_dataloader(batch_size, workers, dataset='pdb', data_path='./data', se
         else:
             val_df = train_df.copy()
 
-        train_set = CPIDataset(train_df, f'{path}/compound', f'{path}/protein/train')
-        val_set = CPIDataset(val_df, f'{path}/compound', f'{path}/protein/train')
-        test_set = CPIDataset(test_df, f'{path}/compound', f'{path}/protein/test')
+        train_set = CPIDataset(train_df, f'{path}/compound', f'{path}/protein/train', strict=strict)
+        val_set = CPIDataset(val_df, f'{path}/compound', f'{path}/protein/train', strict=strict)
+        test_set = CPIDataset(test_df, f'{path}/compound', f'{path}/protein/test', strict=strict)
 
     else:
         train_df = pd.read_csv(f'{path}_train.csv')
@@ -170,9 +170,9 @@ def others_dataloader(batch_size, workers, dataset='pdb', data_path='./data', se
         else:
             val_df = train_df.copy()
 
-        train_set = CPIDataset(train_df, f'{path}/compound', f'{path}/protein')
-        val_set = CPIDataset(val_df, f'{path}/compound', f'{path}/protein')
-        test_set = CPIDataset(test_df, f'{path}/compound', f'{path}/protein')
+        train_set = CPIDataset(train_df, f'{path}/compound', f'{path}/protein', strict=strict)
+        val_set = CPIDataset(val_df, f'{path}/compound', f'{path}/protein', strict=strict)
+        test_set = CPIDataset(test_df, f'{path}/compound', f'{path}/protein', strict=strict)
 
     train_loader = DataLoader(
         train_set,
@@ -208,6 +208,77 @@ def others_dataloader(batch_size, workers, dataset='pdb', data_path='./data', se
 
 
 
+def validate_dataset_prerequisites(dataset, data_path='./data', strict=False):
+    """
+    Validate that required raw data and preprocessed files exist for the dataset.
+    If missing, print a descriptive error banner with the exact preprocessing commands
+    required to generate them, and exit cleanly (or raise under --strict).
+    """
+    missing = []
+    path = os.path.join(data_path, dataset)
+
+    # 1. Raw CSV check
+    if dataset == 'davis':
+        raw_csv = f'{path}.csv'
+        if not os.path.isfile(raw_csv):
+            missing.append(f"Raw dataset CSV: {raw_csv}")
+    else:
+        train_csv = f'{path}_train.csv'
+        test_csv = f'{path}_test.csv'
+        if not os.path.isfile(train_csv):
+            missing.append(f"Raw train CSV: {train_csv}")
+        if not os.path.isfile(test_csv):
+            missing.append(f"Raw test CSV: {test_csv}")
+
+    # 2. Compound features
+    mol_dict = os.path.join(path, 'compound', 'mol_dict.pkl')
+    if not os.path.isfile(mol_dict):
+        missing.append(f"Pretrained ChemBERTa embeddings: {mol_dict}")
+
+    # 3. Protein sequence embeddings
+    prot_dir = os.path.join(path, 'protein')
+    if dataset == 'bindingdb':
+        prot_dir = os.path.join(path, 'protein', 'train')
+    if not os.path.isdir(prot_dir) or not any(f.endswith('.npy') for f in os.listdir(prot_dir) if os.path.isfile(os.path.join(prot_dir, f))):
+        missing.append(f"Pretrained ESM-2 sequence embeddings directory: {prot_dir}")
+
+    # 4. Protein structure contact graphs
+    struct_dir = os.path.join(path, 'protein', 'structure')
+    if dataset == 'bindingdb':
+        struct_dir = os.path.join(path, 'protein', 'train', 'structure')
+    if not os.path.isdir(struct_dir) or not any(f.endswith('_node.npy') for f in os.listdir(struct_dir) if os.path.isfile(os.path.join(struct_dir, f))):
+        missing.append(f"Protein structure contact graphs directory: {struct_dir}")
+
+    if missing:
+        task = 'dti' if dataset == 'bindingdb' else 'dta'
+        banner = [
+            "=" * 80,
+            f"PREREQUISITE CHECK FAILED: Missing Preprocessed Files for Dataset '{dataset}'",
+            "=" * 80,
+            "The following required data files were not found:",
+        ]
+        for m in missing:
+            banner.append(f"  - {m}")
+        banner.extend([
+            "",
+            "To generate the missing preprocessed files, run the preprocessing pipeline:",
+            f"  1. ChemBERTa compound embeddings:",
+            f"     python preprocessing/compound_pretrain.py --root_data_path {data_path} --dataset {dataset}",
+            f"  2. ESM-2 protein sequence embeddings:",
+            f"     python preprocessing/protein_pretrain/protein_{task}.py --root_data_path {data_path} --dataset {dataset}",
+            f"  3. AlphaFold / RCSB protein contact graphs:",
+            f"     python preprocessing/protein_pretrain/protein_structure.py --root_data_path {data_path} --dataset {dataset}",
+            "=" * 80,
+        ])
+        msg = "\n".join(banner)
+        print(msg)
+        if strict:
+            raise FileNotFoundError(msg)
+        return False, missing
+    return True, []
+
+
+
 def run(args: argparse.Namespace):
     data_path = args.root_data_path
     dataset = args.dataset
@@ -217,8 +288,15 @@ def run(args: argparse.Namespace):
     seed = args.seed
     split_name = getattr(args, 'split', 'random')
     variant_name = getattr(args, 'variant', 'full')
+    strict = getattr(args, 'strict', False)
 
     set_seed(seed)
+
+    # Prerequisite validation
+    if not getattr(args, 'skip_pre_check', False):
+        ok, missing = validate_dataset_prerequisites(dataset, data_path, strict=strict)
+        if not ok:
+            sys.exit(1)
 
     run_dir = setup_run_dir(args.output_dir, dataset, split_name, variant_name)
     save_run_config(run_dir, args)
@@ -226,6 +304,16 @@ def run(args: argparse.Namespace):
 
     logger.info(f"Initialized BiSSA run directory: {run_dir}")
     logger.info(f"Args: dataset={dataset}, split={split_name}, variant={variant_name}, objective={args.objective}, seed={seed}, lr={LR}, epochs={NUM_EPOCHS}")
+
+    # Graph coverage check & reporting
+    coverage_file = os.path.join(data_path, dataset, 'graph_coverage.json')
+    if os.path.isfile(coverage_file):
+        with open(coverage_file, 'r', encoding='utf-8') as f:
+            cov = json.load(f)
+        logger.info(f"[Graph Coverage] {dataset}: {cov.get('resolved', 0)}/{cov.get('total_proteins', 0)} resolved "
+                    f"({(1.0 - cov.get('fallback_rate', 0.0)):.1%}), {cov.get('fell_back', 0)} fell back ({cov.get('fallback_rate', 0.0):.1%})")
+        if strict and cov.get('fell_back', 0) > 0:
+            raise RuntimeError(f"Dataset '{dataset}' has {cov['fell_back']} proteins requiring fallback under --strict.")
 
     # Build model
     model = BiSSANet(args).to(device)
@@ -236,6 +324,7 @@ def run(args: argparse.Namespace):
             seed, batch_size, args.num_workers, dataset, data_path,
             split=split_name,
             dedup=getattr(args, 'dedup', 'none'),
+            strict=strict,
         )
     else:
         train_loader, val_loader, raw_test_loader = others_dataloader(
@@ -243,7 +332,13 @@ def run(args: argparse.Namespace):
             seed=seed,
             val_frac=getattr(args, 'val_frac', 0.1),
             dedup=getattr(args, 'dedup', 'none'),
+            strict=strict,
         )
+
+    # Check for invalid SMILES fallbacks during loading
+    invalid_smiles = get_invalid_smiles_log()
+    if invalid_smiles:
+        logger.warning(f"[Compound Fallback] {len(invalid_smiles)} invalid SMILES encountered during loading.")
 
     # STRICT TEST-SET ISOLATION: wrap test loader in an IsolatedLoader
     test_loader = IsolatedLoader(raw_test_loader, name=f"test_loader({dataset})")
@@ -452,6 +547,10 @@ def parse_args(args=None):
                         help='Validation fraction carved from training partition for non-Davis datasets (default: 0.1)')
     parser.add_argument('--output_dir', type=str, default='runs',
                         help='Base directory for run outputs (config, logs, checkpoints, final metrics)')
+    parser.add_argument('--strict', action='store_true', default=False,
+                        help='Strict mode: raise error on invalid SMILES, missing structure files, or fallback data')
+    parser.add_argument('--skip_pre_check', action='store_true', default=False,
+                        help='Skip startup prerequisite file check (useful for synthetic smoke tests)')
 
     return parser.parse_args(args)
 

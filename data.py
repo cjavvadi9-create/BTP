@@ -3,13 +3,18 @@ import pandas as pd
 import torch
 from torch.utils.data import DataLoader, Dataset
 import pickle
+import os
+import logging
 from preprocessing.compound import *
+from preprocessing.protein_pretrain.protein_structure import residue_features
+
+logger = logging.getLogger(__name__)
 
 
 class CPIDataset(Dataset):
 
 
-    def __init__(self, file_path, compound_data_path, protein_data_path):
+    def __init__(self, file_path, compound_data_path, protein_data_path, strict=False):
 
         if isinstance(file_path, pd.DataFrame):
             self.raw_data = file_path.reset_index(drop=True)
@@ -19,6 +24,7 @@ class CPIDataset(Dataset):
         self.sequence_values = self.raw_data['target_sequence'].values
         self.compound_data_path = compound_data_path
         self.protein_data_path = protein_data_path
+        self.strict = strict
 
         self.label_values = self.raw_data['label'].values
 
@@ -39,18 +45,53 @@ class CPIDataset(Dataset):
     def __getitem__(self, idx):
         smiles = self.smiles_values[idx]
         label = self.label_values[idx]
+        target_id = str(self.prot_id[idx])
+        sequence = self.sequence_values[idx]
 
-        compound_node_features, compound_adj_matrix = get_mol_features(smiles)
-        smiles_embedding = self.loaded_dict[smiles]
+        compound_node_features, compound_adj_matrix = get_mol_features(smiles, strict=self.strict)
 
-        protein_seq_embedding = np.load(f'{self.protein_data_path}/' + self.prot_id[idx]+'.npy').squeeze()
+        if self.loaded_dict is not None and smiles in self.loaded_dict:
+            smiles_embedding = self.loaded_dict[smiles]
+        else:
+            if self.strict and self.loaded_dict is not None:
+                raise KeyError(f"SMILES '{smiles}' missing from {self.compound_data_path}/mol_dict.pkl under --strict")
+            smiles_embedding = np.zeros((1, 384), dtype=np.float32)
 
-        protein_node_features = np.load(
-            f'{self.protein_data_path}/structure/{self.prot_id[idx]}_node.npy'
-        )
-        protein_adj_matrix = np.load(
-            f'{self.protein_data_path}/structure/{self.prot_id[idx]}_adj.npy'
-        )
+        # Protein sequence embedding
+        seq_emb_path = os.path.join(self.protein_data_path, f'{target_id}.npy')
+        if not os.path.isfile(seq_emb_path):
+            parent_seq_emb = os.path.join(os.path.dirname(self.protein_data_path), f'{target_id}.npy')
+            if os.path.isfile(parent_seq_emb):
+                seq_emb_path = parent_seq_emb
+
+        if os.path.isfile(seq_emb_path):
+            protein_seq_embedding = np.load(seq_emb_path).squeeze()
+        else:
+            if self.strict:
+                raise FileNotFoundError(f"Missing protein sequence embedding for {target_id} at {seq_emb_path} under --strict")
+            L_seq = min(len(sequence), 1022)
+            protein_seq_embedding = np.zeros((L_seq, 480), dtype=np.float32)
+
+        # Protein structure files
+        node_file = os.path.join(self.protein_data_path, 'structure', f'{target_id}_node.npy')
+        adj_file = os.path.join(self.protein_data_path, 'structure', f'{target_id}_adj.npy')
+
+        if not (os.path.isfile(node_file) and os.path.isfile(adj_file)):
+            parent_node = os.path.join(os.path.dirname(self.protein_data_path), 'structure', f'{target_id}_node.npy')
+            parent_adj = os.path.join(os.path.dirname(self.protein_data_path), 'structure', f'{target_id}_adj.npy')
+            if os.path.isfile(parent_node) and os.path.isfile(parent_adj):
+                node_file = parent_node
+                adj_file = parent_adj
+
+        if os.path.isfile(node_file) and os.path.isfile(adj_file):
+            protein_node_features = np.load(node_file)
+            protein_adj_matrix = np.load(adj_file)
+        else:
+            if self.strict:
+                raise FileNotFoundError(f"Missing protein structure files for {target_id} under --strict")
+            L = len(sequence)
+            protein_node_features = residue_features(sequence, np.zeros(L, dtype=np.float32))
+            protein_adj_matrix = np.eye(L, dtype=np.float32)
 
         return {
             'COMPOUND_NODE_FEAT': compound_node_features,
