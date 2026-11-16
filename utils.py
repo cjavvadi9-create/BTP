@@ -93,6 +93,29 @@ def setup_logger(run_dir, name='BiSSA'):
     return logger
 
 
+class IsolatedLoader:
+    """Wrapper that enforces test-set isolation by throwing on access while locked."""
+    def __init__(self, loader, name="test_loader"):
+        self._loader = loader
+        self._name = name
+        self.is_locked = True
+
+    def unlock(self):
+        self.is_locked = False
+
+    def __iter__(self):
+        if self.is_locked:
+            raise RuntimeError(f"CRITICAL PROTOCOL VIOLATION: {self._name} accessed while locked during training! Test-set isolation violated.")
+        return iter(self._loader)
+
+    def __len__(self):
+        return len(self._loader)
+
+    @property
+    def dataset(self):
+        return self._loader.dataset
+
+
 def rmse(y,f):
     rmse = sqrt(((y - f)**2).mean(axis=0))
     return rmse
