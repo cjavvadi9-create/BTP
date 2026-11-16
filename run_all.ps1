@@ -1,4 +1,4 @@
-﻿# run_all.ps1
+# run_all.ps1
 # Full Paper Benchmark Training
 # Paper: "Bidirectional Sequence–Structure Attention for Drug–Target Interaction and Affinity Prediction"
 # Hyperparameters: batch_size=128, max_epochs=200, lr=1e-3, seed=0

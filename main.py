@@ -87,6 +87,46 @@ def predicting_dti(model, loader):
     return np.concatenate(total_labels), np.concatenate(total_preds)
 
 
+DATASET_ALIASES = {
+    'davis': 'davis',
+    'pdb': 'pdbbind',
+    'pdbbind': 'pdbbind',
+    'tdc': 'tdc_dg',
+    'tdc_dg': 'tdc_dg',
+    'tdcdg': 'tdc_dg',
+    'bindingdb': 'bindingdb',
+    'bdb': 'bindingdb',
+}
+
+
+def resolve_dataset_file_prefix(dataset, data_path='./data'):
+    """Resolve file prefix and directory name for a dataset, handling aliases."""
+    dataset_norm = DATASET_ALIASES.get(dataset.lower(), dataset.lower())
+
+    if dataset_norm == 'davis':
+        csv_file = os.path.join(data_path, 'davis.csv')
+        dir_prefix = os.path.join(data_path, 'davis')
+        return csv_file, dir_prefix
+
+    # Check CSV prefix
+    if os.path.isfile(os.path.join(data_path, f'{dataset_norm}_train.csv')):
+        csv_prefix = os.path.join(data_path, dataset_norm)
+    elif dataset_norm == 'pdbbind' and os.path.isfile(os.path.join(data_path, 'pdb_train.csv')):
+        csv_prefix = os.path.join(data_path, 'pdb')
+    else:
+        csv_prefix = os.path.join(data_path, dataset_norm)
+
+    # Check directory prefix
+    if os.path.isdir(os.path.join(data_path, dataset_norm)):
+        dir_prefix = os.path.join(data_path, dataset_norm)
+    elif dataset_norm == 'pdbbind' and os.path.isdir(os.path.join(data_path, 'pdb')):
+        dir_prefix = os.path.join(data_path, 'pdb')
+    else:
+        dir_prefix = os.path.join(data_path, dataset_norm)
+
+    return csv_prefix, dir_prefix
+
+
 def davis_dataloader(seed=0, batch_size=128, workers=4, dataset='davis', data_path='./data', split='random', dedup='none', strict=False):
     print(f'\nrunning on {dataset} with split: {split}, dedup: {dedup}')
 
@@ -133,14 +173,14 @@ def davis_dataloader(seed=0, batch_size=128, workers=4, dataset='davis', data_pa
 
     return train_loader, val_loader, test_loader
 
-def others_dataloader(batch_size, workers, dataset='pdb', data_path='./data', seed=0, val_frac=0.1, dedup='none', strict=False):
+def others_dataloader(batch_size, workers, dataset='pdbbind', data_path='./data', seed=0, val_frac=0.1, dedup='none', strict=False):
     print(f'\nrunning on {dataset} (val_frac={val_frac}, dedup={dedup})')
+    dataset_norm = DATASET_ALIASES.get(dataset.lower(), dataset.lower())
+    csv_prefix, dir_prefix = resolve_dataset_file_prefix(dataset_norm, data_path)
 
-    path = data_path + '/' + dataset
-
-    if dataset == 'bindingdb':
-        train_df = pd.read_csv(f'{path}_train.csv')
-        test_df = pd.read_csv(f'{path}_test.csv')
+    if dataset_norm == 'bindingdb':
+        train_df = pd.read_csv(f'{csv_prefix}_train.csv')
+        test_df = pd.read_csv(f'{csv_prefix}_test.csv')
 
         if dedup == 'train':
             train_df, _ = deduplicate_train_against_eval(train_df, [test_df])
@@ -152,13 +192,13 @@ def others_dataloader(batch_size, workers, dataset='pdb', data_path='./data', se
         else:
             val_df = train_df.copy()
 
-        train_set = CPIDataset(train_df, f'{path}/compound', f'{path}/protein/train', strict=strict)
-        val_set = CPIDataset(val_df, f'{path}/compound', f'{path}/protein/train', strict=strict)
-        test_set = CPIDataset(test_df, f'{path}/compound', f'{path}/protein/test', strict=strict)
+        train_set = CPIDataset(train_df, f'{dir_prefix}/compound', f'{dir_prefix}/protein/train', strict=strict)
+        val_set = CPIDataset(val_df, f'{dir_prefix}/compound', f'{dir_prefix}/protein/train', strict=strict)
+        test_set = CPIDataset(test_df, f'{dir_prefix}/compound', f'{dir_prefix}/protein/test', strict=strict)
 
     else:
-        train_df = pd.read_csv(f'{path}_train.csv')
-        test_df = pd.read_csv(f'{path}_test.csv')
+        train_df = pd.read_csv(f'{csv_prefix}_train.csv')
+        test_df = pd.read_csv(f'{csv_prefix}_test.csv')
 
         if dedup == 'train':
             train_df, _ = deduplicate_train_against_eval(train_df, [test_df])
@@ -170,9 +210,9 @@ def others_dataloader(batch_size, workers, dataset='pdb', data_path='./data', se
         else:
             val_df = train_df.copy()
 
-        train_set = CPIDataset(train_df, f'{path}/compound', f'{path}/protein', strict=strict)
-        val_set = CPIDataset(val_df, f'{path}/compound', f'{path}/protein', strict=strict)
-        test_set = CPIDataset(test_df, f'{path}/compound', f'{path}/protein', strict=strict)
+        train_set = CPIDataset(train_df, f'{dir_prefix}/compound', f'{dir_prefix}/protein', strict=strict)
+        val_set = CPIDataset(val_df, f'{dir_prefix}/compound', f'{dir_prefix}/protein', strict=strict)
+        test_set = CPIDataset(test_df, f'{dir_prefix}/compound', f'{dir_prefix}/protein', strict=strict)
 
     train_loader = DataLoader(
         train_set,
@@ -215,42 +255,43 @@ def validate_dataset_prerequisites(dataset, data_path='./data', strict=False):
     required to generate them, and exit cleanly (or raise under --strict).
     """
     missing = []
-    path = os.path.join(data_path, dataset)
+    dataset_norm = DATASET_ALIASES.get(dataset.lower(), dataset.lower())
+    csv_prefix, dir_prefix = resolve_dataset_file_prefix(dataset_norm, data_path)
 
     # 1. Raw CSV check
-    if dataset == 'davis':
-        raw_csv = f'{path}.csv'
+    if dataset_norm == 'davis':
+        raw_csv = os.path.join(data_path, 'davis.csv')
         if not os.path.isfile(raw_csv):
             missing.append(f"Raw dataset CSV: {raw_csv}")
     else:
-        train_csv = f'{path}_train.csv'
-        test_csv = f'{path}_test.csv'
+        train_csv = f'{csv_prefix}_train.csv'
+        test_csv = f'{csv_prefix}_test.csv'
         if not os.path.isfile(train_csv):
             missing.append(f"Raw train CSV: {train_csv}")
         if not os.path.isfile(test_csv):
             missing.append(f"Raw test CSV: {test_csv}")
 
     # 2. Compound features
-    mol_dict = os.path.join(path, 'compound', 'mol_dict.pkl')
+    mol_dict = os.path.join(dir_prefix, 'compound', 'mol_dict.pkl')
     if not os.path.isfile(mol_dict):
         missing.append(f"Pretrained ChemBERTa embeddings: {mol_dict}")
 
     # 3. Protein sequence embeddings
-    prot_dir = os.path.join(path, 'protein')
-    if dataset == 'bindingdb':
-        prot_dir = os.path.join(path, 'protein', 'train')
+    prot_dir = os.path.join(dir_prefix, 'protein')
+    if dataset_norm == 'bindingdb':
+        prot_dir = os.path.join(dir_prefix, 'protein', 'train')
     if not os.path.isdir(prot_dir) or not any(f.endswith('.npy') for f in os.listdir(prot_dir) if os.path.isfile(os.path.join(prot_dir, f))):
         missing.append(f"Pretrained ESM-2 sequence embeddings directory: {prot_dir}")
 
     # 4. Protein structure contact graphs
-    struct_dir = os.path.join(path, 'protein', 'structure')
-    if dataset == 'bindingdb':
-        struct_dir = os.path.join(path, 'protein', 'train', 'structure')
+    struct_dir = os.path.join(dir_prefix, 'protein', 'structure')
+    if dataset_norm == 'bindingdb':
+        struct_dir = os.path.join(dir_prefix, 'protein', 'train', 'structure')
     if not os.path.isdir(struct_dir) or not any(f.endswith('_node.npy') for f in os.listdir(struct_dir) if os.path.isfile(os.path.join(struct_dir, f))):
         missing.append(f"Protein structure contact graphs directory: {struct_dir}")
 
     if missing:
-        task = 'dti' if dataset == 'bindingdb' else 'dta'
+        task = 'dti' if dataset_norm == 'bindingdb' else 'dta'
         banner = [
             "=" * 80,
             f"PREREQUISITE CHECK FAILED: Missing Preprocessed Files for Dataset '{dataset}'",
@@ -504,11 +545,14 @@ def parse_args(args=None):
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--root_data_path', type=str, default='./data', help='Raw Data Path')
-    parser.add_argument('--dataset', type=str, default='pdb', help='Datasets')
+    parser.add_argument('--dataset', type=str, default='davis',
+                        help='Datasets: davis, pdbbind, tdc_dg, bindingdb (aliases: pdb, tdc, bdb)')
+    parser.add_argument('--task', type=str, default=None, choices=['dta', 'dti'],
+                        help='Task type: dta (regression) or dti (classification). Inferred from dataset if not provided.')
     parser.add_argument('--objective',
                         type=str,
-                        default='regression',
-                        help='Objective (classification / regression)')
+                        default=None,
+                        help='Objective (classification / regression). Inferred from task/dataset if omitted.')
     parser.add_argument('--seed', type=int, default=0, help='Random Seed')
     parser.add_argument('--batch_size', type=int, default=128, help='Batch Size for Train(Validation/Test)')
     parser.add_argument('--epochs', '--max_epochs', dest='max_epochs', type=int, default=200, help='Max Training Epochs')
@@ -552,7 +596,31 @@ def parse_args(args=None):
     parser.add_argument('--skip_pre_check', action='store_true', default=False,
                         help='Skip startup prerequisite file check (useful for synthetic smoke tests)')
 
-    return parser.parse_args(args)
+    parsed = parser.parse_args(args)
+
+    # Normalize dataset name
+    dataset_raw = parsed.dataset.lower()
+    parsed.dataset = DATASET_ALIASES.get(dataset_raw, dataset_raw)
+
+    # Infer task and objective
+    if parsed.task is None:
+        if parsed.dataset == 'bindingdb':
+            parsed.task = 'dti'
+        else:
+            parsed.task = 'dta'
+
+    if parsed.objective is None:
+        if parsed.task == 'dti':
+            parsed.objective = 'classification'
+        else:
+            parsed.objective = 'regression'
+    else:
+        if parsed.task == 'dti' and parsed.objective != 'classification':
+            parsed.objective = 'classification'
+        elif parsed.task == 'dta' and parsed.objective != 'regression':
+            parsed.objective = 'regression'
+
+    return parsed
 
 if __name__ == '__main__':
     params = parse_args()
