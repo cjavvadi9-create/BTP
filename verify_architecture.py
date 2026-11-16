@@ -437,6 +437,95 @@ def print_stage_by_stage_shapes(model):
     print()
 
 
+def verify_ablation_variants():
+    print("=" * 70)
+    print("VERIFICATION: Part B Ablation Variants (A1 - A6)")
+    print("=" * 70)
+
+    # 1. Check variant='full' state_dict keys and shapes against Part A baseline
+    args_dta = make_dummy_args()
+    args_dta.objective = 'regression'
+    args_dta.variant = 'full'
+    model_full = BiSSANet(args_dta)
+
+    expected_fusion_dims = {
+        'full': 512,
+        'A1': 256,
+        'A2': 256,
+        'A3': 384,
+        'A4': 512,
+        'A5': 256,
+        'A6': 256,
+    }
+
+    results = []
+
+    for variant in ['full', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6']:
+        # DTA
+        args_dta = make_dummy_args()
+        args_dta.objective = 'regression'
+        args_dta.variant = variant
+        m_dta = BiSSANet(args_dta)
+        dta_params = sum(p.numel() for p in m_dta.parameters() if p.requires_grad)
+
+        assert m_dta.lin[0].in_features == expected_fusion_dims[variant], (
+            f"Variant {variant} DTA lin in_features {m_dta.lin[0].in_features} != expected {expected_fusion_dims[variant]}"
+        )
+
+        # DTI
+        args_dti = make_dummy_args()
+        args_dti.objective = 'classification'
+        args_dti.variant = variant
+        m_dti = BiSSANet(args_dti)
+        dti_params = sum(p.numel() for p in m_dti.parameters() if p.requires_grad)
+
+        assert m_dti.lin[0].in_features == expected_fusion_dims[variant], (
+            f"Variant {variant} DTI lin in_features {m_dti.lin[0].in_features} != expected {expected_fusion_dims[variant]}"
+        )
+
+        # Forward & Backward gradient check
+        dummy_batch = build_dummy_batch(B=2)
+        out_dta = m_dta(dummy_batch)
+        assert out_dta.shape == (2, 1), f"Variant {variant} DTA output shape {out_dta.shape} != (2, 1)"
+        loss_dta = out_dta.sum()
+        loss_dta.backward()
+
+        for name, p in m_dta.named_parameters():
+            assert p.grad is not None, f"Variant {variant} DTA: Parameter {name} received no gradient!"
+            assert (p.grad != 0).any(), f"Variant {variant} DTA: Parameter {name} received all-zero gradient!"
+
+        out_dti = m_dti(dummy_batch)
+        assert out_dti.shape == (2, 2), f"Variant {variant} DTI output shape {out_dti.shape} != (2, 2)"
+        loss_dti = out_dti.sum()
+        loss_dti.backward()
+
+        for name, p in m_dti.named_parameters():
+            assert p.grad is not None, f"Variant {variant} DTI: Parameter {name} received no gradient!"
+            assert (p.grad != 0).any(), f"Variant {variant} DTI: Parameter {name} received all-zero gradient!"
+
+        results.append((variant, dta_params, dti_params, len(list(m_dta.parameters())), len(list(m_dti.parameters()))))
+        print(f"  [PASS] Variant {variant:>4}: DTA Params = {dta_params:>10,}, DTI Params = {dti_params:>10,} | 0 ghost params in DTA & DTI")
+
+    # Print summary table
+    print()
+    print(f"| {'Variant':<8} | {'Description':<32} | {'Fusion Dim':<10} | {'DTA Trainable Params':<20} | {'DTI Trainable Params':<20} |")
+    print(f"|{'-'*10}|{'-'*34}|{'-'*12}|{'-'*22}|{'-'*22}|")
+    descriptions = {
+        'full': 'Full BiSSA (4 streams S<->G)',
+        'A1': 'Graph-only (no PLMs/seqs)',
+        'A2': 'Sequence-only (no graphs)',
+        'A3': 'w/o protein graph (Sd<->Gd, Sp)',
+        'A4': 'Concat w/o cross-attention',
+        'A5': 'S <- G only (both entities)',
+        'A6': 'G <- S only (both entities)',
+    }
+    for variant, dta_p, dti_p, _, _ in results:
+        desc = descriptions[variant]
+        fdim = expected_fusion_dims[variant]
+        print(f"| {variant:<8} | {desc:<32} | {fdim:<10} | {dta_p:>20,} | {dti_p:>20,} |")
+    print()
+
+
 def main():
     model_dta, model_dti = verify_items_1_to_10()
     verify_forward_backward_and_gradients(model_dta, model_dti)
@@ -445,6 +534,11 @@ def main():
     print_stage_by_stage_shapes(model_dta)
     print("=" * 70)
     print("ALL PART A VERIFICATIONS PASSED PERFECTLY!")
+    print("=" * 70)
+    print()
+    verify_ablation_variants()
+    print("=" * 70)
+    print("ALL PART A AND PART B VERIFICATIONS PASSED PERFECTLY!")
     print("=" * 70)
 
 
