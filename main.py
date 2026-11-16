@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader, Dataset
 import argparse
 from data import CPIDataset
 from preprocessing.cold_start_split import get_davis_split, compute_all_davis_split_stats
+from leakage_report import deduplicate_train_against_eval
 from models.core import *
 from utils import *
 from sklearn.metrics import precision_recall_curve, roc_curve, auc, f1_score, accuracy_score
@@ -86,13 +87,16 @@ def predicting_dti(model, loader):
     return np.concatenate(total_labels), np.concatenate(total_preds)
 
 
-def davis_dataloader(seed=0, batch_size=128, workers=4, dataset='davis', data_path='./data', split='random'):
-    print(f'\nrunning on {dataset} with split: {split}')
+def davis_dataloader(seed=0, batch_size=128, workers=4, dataset='davis', data_path='./data', split='random', dedup='none'):
+    print(f'\nrunning on {dataset} with split: {split}, dedup: {dedup}')
 
     path = data_path + '/' + dataset
     csv_file = f'{path}.csv'
 
     folds = get_davis_split(csv_file, split=split, seed=seed)
+    if dedup == 'train':
+        folds['train'], _ = deduplicate_train_against_eval(folds['train'], [folds['valid'], folds['test']])
+
     train_dataset = CPIDataset(folds['train'], f'{path}/compound', f'{path}/protein')
     val_dataset = CPIDataset(folds['valid'], f'{path}/compound', f'{path}/protein')
     test_dataset = CPIDataset(folds['test'], f'{path}/compound', f'{path}/protein')
@@ -187,7 +191,9 @@ def run(args: argparse.Namespace):
     # Main program: iterate over different datasets
     if dataset == 'davis':
         train_loader, val_loader, test_loader = davis_dataloader(
-            seed, batch_size, args.num_workers, dataset, data_path, split=getattr(args, 'split', 'random')
+            seed, batch_size, args.num_workers, dataset, data_path,
+            split=getattr(args, 'split', 'random'),
+            dedup=getattr(args, 'dedup', 'none'),
         )
     else:
         train_loader, test_loader = others_dataloader(batch_size, args.num_workers, dataset, data_path, seed=seed)
@@ -315,6 +321,9 @@ def parse_args(args=None):
     parser.add_argument('--split', type=str, default='random',
                         choices=['random', 'cold_drug', 'cold_target', 'cold_pair'],
                         help='Split setting for Davis dataset (random, cold_drug, cold_target, cold_pair)')
+    parser.add_argument('--dedup', type=str, default='none',
+                        choices=['none', 'train'],
+                        help='Deduplication strategy: none (preserve published partition), train (remove pairs from training set that appear in test/val)')
     parser.add_argument('--output_dir', type=str, default='runs',
                         help='Base directory for run outputs (config, logs, checkpoints, final metrics)')
 
