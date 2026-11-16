@@ -99,6 +99,91 @@ def create_fold_setting_cold(df, fold_seed, frac, entities):
         "test": test.reset_index(drop=True),
     }
 
+
+def get_davis_split(df_or_path, split='random', seed=0, frac=[0.8, 0.1, 0.1]):
+    """Return train, valid, test dataframes for Davis according to split protocol."""
+    if isinstance(df_or_path, str):
+        df = pd.read_csv(df_or_path)
+    else:
+        df = df_or_path.copy()
+
+    if split == 'random':
+        return create_fold(df, fold_seed=seed, frac=frac)
+    elif split == 'cold_target':
+        return create_fold_setting_cold(df, fold_seed=seed, frac=frac, entities=['target_sequence'])
+    elif split == 'cold_drug':
+        return create_fold_setting_cold(df, fold_seed=seed, frac=frac, entities=['compound_iso_smiles'])
+    elif split == 'cold_pair':
+        return create_fold_setting_cold(df, fold_seed=seed, frac=frac, entities=['target_sequence', 'compound_iso_smiles'])
+    else:
+        raise ValueError(f"Unknown split '{split}'. Expected one of ['random', 'cold_drug', 'cold_target', 'cold_pair']")
+
+
+def compute_all_davis_split_stats(csv_path='data/davis.csv', seed=0):
+    """Compute exact pair counts and entity overlap across all 4 Davis splits."""
+    df = pd.read_csv(csv_path) if isinstance(csv_path, str) else csv_path
+    splits = {
+        'random': get_davis_split(df, split='random', seed=seed),
+        'cold_drug': get_davis_split(df, split='cold_drug', seed=seed),
+        'cold_target': get_davis_split(df, split='cold_target', seed=seed),
+        'cold_pair': get_davis_split(df, split='cold_pair', seed=seed),
+    }
+
+    stats = {
+        'dataset': 'davis',
+        'seed': seed,
+        'pkd_formula': '-log10(Kd / 1e9)',
+        'pkd_range': [float(df['label'].min()), float(df['label'].max())],
+        'total_dataset_pairs': len(df),
+        'total_unique_drugs': int(df['compound_iso_smiles'].nunique()),
+        'total_unique_targets': int(df['target_sequence'].nunique()),
+        'total_unique_target_ids': int(df['target_id'].nunique()),
+        'splits': {}
+    }
+
+    for name, fold in splits.items():
+        tr, va, te = fold['train'], fold['valid'], fold['test']
+        tot = len(tr) + len(va) + len(te)
+        disc = len(df) - tot
+
+        tr_drugs, va_drugs, te_drugs = set(tr['compound_iso_smiles']), set(va['compound_iso_smiles']), set(te['compound_iso_smiles'])
+        tr_targets, va_targets, te_targets = set(tr['target_sequence']), set(va['target_sequence']), set(te['target_sequence'])
+
+        stats['splits'][name] = {
+            'pairs': {
+                'train': len(tr),
+                'valid': len(va),
+                'test': len(te),
+                'total_retained': tot,
+                'discarded': disc,
+            },
+            'drugs': {
+                'train': int(tr['compound_iso_smiles'].nunique()),
+                'valid': int(va['compound_iso_smiles'].nunique()),
+                'test': int(te['compound_iso_smiles'].nunique()),
+            },
+            'targets': {
+                'train': int(tr['target_sequence'].nunique()),
+                'valid': int(va['target_sequence'].nunique()),
+                'test': int(te['target_sequence'].nunique()),
+            },
+            'target_ids': {
+                'train': int(tr['target_id'].nunique()),
+                'valid': int(va['target_id'].nunique()),
+                'test': int(te['target_id'].nunique()),
+            },
+            'overlap': {
+                'drug_train_test': len(tr_drugs.intersection(te_drugs)),
+                'drug_train_val': len(tr_drugs.intersection(va_drugs)),
+                'drug_val_test': len(va_drugs.intersection(te_drugs)),
+                'target_train_test': len(tr_targets.intersection(te_targets)),
+                'target_train_val': len(tr_targets.intersection(va_targets)),
+                'target_val_test': len(va_targets.intersection(te_targets)),
+            }
+        }
+    return stats
+
+
 dataset_name = 'davis'
 
 

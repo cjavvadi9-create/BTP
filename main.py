@@ -5,6 +5,7 @@ import numpy as np
 from torch.utils.data import DataLoader, Dataset
 import argparse
 from data import CPIDataset
+from preprocessing.cold_start_split import get_davis_split, compute_all_davis_split_stats
 from models.core import *
 from utils import *
 from sklearn.metrics import precision_recall_curve, roc_curve, auc, f1_score, accuracy_score
@@ -85,32 +86,21 @@ def predicting_dti(model, loader):
     return np.concatenate(total_labels), np.concatenate(total_preds)
 
 
-def davis_dataloader(seed=0, batch_size=256, workers=4, dataset = 'davis', data_path='./data'):
-    print('\nrunning on ', dataset)
+def davis_dataloader(seed=0, batch_size=128, workers=4, dataset='davis', data_path='./data', split='random'):
+    print(f'\nrunning on {dataset} with split: {split}')
 
     path = data_path + '/' + dataset
+    csv_file = f'{path}.csv'
 
-    data = CPIDataset(f'{path}.csv', f'{path}/compound', f'{path}/protein')
-
-    print(len(data))
-
-    test_size = (int)(len(data) * 0.1)
-
-    train_dataset, test_dataset = torch.utils.data.random_split(
-        dataset=data,
-        lengths=[len(data) - (test_size * 2), test_size * 2],
-        generator=torch.Generator().manual_seed(seed)
-    )
-    val_dataset, test_dataset = torch.utils.data.random_split(
-        dataset=test_dataset,
-        lengths=[test_size, test_size],
-        generator=torch.Generator().manual_seed(seed)
-    )
+    folds = get_davis_split(csv_file, split=split, seed=seed)
+    train_dataset = CPIDataset(folds['train'], f'{path}/compound', f'{path}/protein')
+    val_dataset = CPIDataset(folds['valid'], f'{path}/compound', f'{path}/protein')
+    test_dataset = CPIDataset(folds['test'], f'{path}/compound', f'{path}/protein')
 
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
-        collate_fn=data.collate_fn,
+        collate_fn=train_dataset.collate_fn,
         shuffle=True,
         num_workers=workers,
         worker_init_fn=seed_worker,
@@ -120,7 +110,7 @@ def davis_dataloader(seed=0, batch_size=256, workers=4, dataset = 'davis', data_
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
-        collate_fn=data.collate_fn,
+        collate_fn=val_dataset.collate_fn,
         shuffle=False,
         num_workers=workers,
         worker_init_fn=seed_worker,
@@ -130,7 +120,7 @@ def davis_dataloader(seed=0, batch_size=256, workers=4, dataset = 'davis', data_
     test_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
-        collate_fn=data.collate_fn,
+        collate_fn=test_dataset.collate_fn,
         shuffle=False,
         num_workers=workers,
         worker_init_fn=seed_worker,
@@ -196,9 +186,11 @@ def run(args: argparse.Namespace):
 
     # Main program: iterate over different datasets
     if dataset == 'davis':
-        train_loader, val_loader, test_loader = davis_dataloader(seed, batch_size, args.num_workers, dataset, data_path)
+        train_loader, val_loader, test_loader = davis_dataloader(
+            seed, batch_size, args.num_workers, dataset, data_path, split=getattr(args, 'split', 'random')
+        )
     else:
-        train_loader,test_loader = others_dataloader(batch_size, args.num_workers, dataset, data_path)
+        train_loader, test_loader = others_dataloader(batch_size, args.num_workers, dataset, data_path, seed=seed)
 
 
     if args.objective == 'regression':
@@ -320,6 +312,9 @@ def parse_args(args=None):
     parser.add_argument('--variant', type=str, default='full',
                         choices=['full', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6'],
                         help='Ablation variant: full (BiSSA), A1 (graph-only), A2 (sequence-only), A3 (w/o protein graph), A4 (concat w/o cross-attn), A5 (S<-G only), A6 (G<-S only)')
+    parser.add_argument('--split', type=str, default='random',
+                        choices=['random', 'cold_drug', 'cold_target', 'cold_pair'],
+                        help='Split setting for Davis dataset (random, cold_drug, cold_target, cold_pair)')
     parser.add_argument('--output_dir', type=str, default='runs',
                         help='Base directory for run outputs (config, logs, checkpoints, final metrics)')
 

@@ -11,18 +11,25 @@ class CPIDataset(Dataset):
 
     def __init__(self, file_path, compound_data_path, protein_data_path):
 
-        self.raw_data = pd.read_csv(file_path)
+        if isinstance(file_path, pd.DataFrame):
+            self.raw_data = file_path.reset_index(drop=True)
+        else:
+            self.raw_data = pd.read_csv(file_path)
         self.smiles_values = self.raw_data['compound_iso_smiles'].values
         self.sequence_values = self.raw_data['target_sequence'].values
-        self.compound_data_path =  compound_data_path
+        self.compound_data_path = compound_data_path
         self.protein_data_path = protein_data_path
 
         self.label_values = self.raw_data['label'].values
 
         self.prot_id = self.raw_data['target_id'].values
 
-        with open(f'{self.compound_data_path}/mol_dict.pkl', 'rb') as file:
-            self.loaded_dict = pickle.load(file)
+        mol_dict_file = f'{self.compound_data_path}/mol_dict.pkl'
+        if os.path.exists(mol_dict_file):
+            with open(mol_dict_file, 'rb') as file:
+                self.loaded_dict = pickle.load(file)
+        else:
+            self.loaded_dict = None
 
    
 
