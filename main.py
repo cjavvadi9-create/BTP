@@ -307,6 +307,9 @@ def parse_args():
                                                                                  'compound language model')
     parser.add_argument('--protein_pretrained_dim', type=int, default=480, help='Dimension of pretrained for protein '
                                                                                 'language model')
+    parser.add_argument('--variant', type=str, default='full',
+                        choices=['full', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6'],
+                        help='Ablation variant: full (BiSSA), A1 (graph-only), A2 (sequence-only), A3 (w/o protein graph), A4 (concat w/o cross-attn), A5 (S<-G only), A6 (G<-S only)')
 
 
 
