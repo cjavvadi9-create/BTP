@@ -17,8 +17,70 @@ from sklearn.metrics import RocCurveDisplay
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+
+def setup_device_and_model(model, gpus_arg='all', logger=None):
+    """
+    Configure compute device and DataParallel wrapping.
+    If multiple GPUs are available and requested, wrap model with torch.nn.DataParallel.
+    """
+    if gpus_arg == 'cpu' or not torch.cuda.is_available():
+        dev = torch.device('cpu')
+        model = model.to(dev)
+        if logger:
+            logger.info("Using device: CPU")
+        return model, dev
+
+    num_available = torch.cuda.device_count()
+    if gpus_arg == 'all':
+        device_ids = list(range(num_available))
+    elif isinstance(gpus_arg, str) and ',' in gpus_arg:
+        device_ids = [int(x.strip()) for x in gpus_arg.split(',') if x.strip().isdigit()]
+    elif isinstance(gpus_arg, (int, str)) and str(gpus_arg).strip().isdigit():
+        device_ids = [int(str(gpus_arg).strip())]
+    else:
+        device_ids = [0]
+
+    device_ids = [d for d in device_ids if d < num_available]
+    if not device_ids:
+        device_ids = [0]
+
+    primary_device = torch.device(f'cuda:{device_ids[0]}')
+    model = model.to(primary_device)
+
+    if len(device_ids) > 1:
+        model = torch.nn.DataParallel(model, device_ids=device_ids)
+        if logger:
+            logger.info(f"Using DataParallel across {len(device_ids)} GPUs: {device_ids}")
+    else:
+        if logger:
+            logger.info(f"Using single GPU: cuda:{device_ids[0]}")
+
+    return model, primary_device
+
+
+def save_model_checkpoint(model, path):
+    """Save model state dict, unwrapping DataParallel or any module-wrapped model."""
+    raw_model = getattr(model, 'module', model)
+    torch.save(raw_model.state_dict(), path)
+
+
+def load_model_checkpoint(model, path, device):
+    """Load model state dict, unwrapping DataParallel if necessary and handling 'module.' prefix."""
+    raw_model = getattr(model, 'module', model)
+    state_dict = torch.load(path, map_location=device)
+    cleaned_state_dict = {}
+    for k, v in state_dict.items():
+        if k.startswith('module.'):
+            cleaned_state_dict[k[7:]] = v
+        else:
+            cleaned_state_dict[k] = v
+    raw_model.load_state_dict(cleaned_state_dict)
+
+
 # training function at each epoch
-def train_dta(model, loss_fn, train_loader, optimizer, epoch):
+def train_dta(model, loss_fn, train_loader, optimizer, epoch, device=None):
+    if device is None:
+        device = next(model.parameters()).device
     print('Training on {} samples...'.format(len(train_loader.dataset)))
     if hasattr(torch.cuda, 'empty_cache'):
         torch.cuda.empty_cache()
@@ -53,7 +115,9 @@ def predicting_dta(model, loader):
     return total_labels.numpy().flatten(),total_preds.numpy().flatten()
 
 
-def train_dti(model, loss_fn, train_loader, optimizer, epoch):
+def train_dti(model, loss_fn, train_loader, optimizer, epoch, device=None):
+    if device is None:
+        device = next(model.parameters()).device
     print('Training on {} samples...'.format(len(train_loader.dataset)))
     if hasattr(torch.cuda, 'empty_cache'):
         torch.cuda.empty_cache()
@@ -356,8 +420,9 @@ def run(args: argparse.Namespace):
         if strict and cov.get('fell_back', 0) > 0:
             raise RuntimeError(f"Dataset '{dataset}' has {cov['fell_back']} proteins requiring fallback under --strict.")
 
-    # Build model
-    model = BiSSANet(args).to(device)
+    # Build model and setup device / DataParallel
+    model = BiSSANet(args)
+    model, device = setup_device_and_model(model, getattr(args, 'gpus', 'all'), logger)
 
     # Load data
     if dataset == 'davis':
@@ -432,7 +497,7 @@ def run(args: argparse.Namespace):
             if val_mae < best_val_mae:
                 best_val_mae = val_mae
                 best_epoch = epoch + 1
-                torch.save(model.state_dict(), best_model_path)
+                save_model_checkpoint(model, best_model_path)
                 logger.info(f"  --> Best Val MAE improved to {best_val_mae:.4f} at epoch {best_epoch}. Saved {best_model_path}")
 
             scheduler.step(val_mae)
@@ -441,7 +506,7 @@ def run(args: argparse.Namespace):
         logger.info(f"Training completed. Loading best checkpoint from epoch {best_epoch} (Val MAE: {best_val_mae:.4f}) for final test evaluation...")
         test_loader.unlock()
         if os.path.exists(best_model_path):
-            model.load_state_dict(torch.load(best_model_path, map_location=device))
+            load_model_checkpoint(model, best_model_path, device)
         model.eval()
 
         G_test, P_test = predicting_dta(model, test_loader)
@@ -499,7 +564,7 @@ def run(args: argparse.Namespace):
             if val_aupr > best_val_aupr:
                 best_val_aupr = val_aupr
                 best_epoch = epoch + 1
-                torch.save(model.state_dict(), best_model_path)
+                save_model_checkpoint(model, best_model_path)
                 logger.info(f"  --> Best Val AUPR improved to {best_val_aupr:.4f} at epoch {best_epoch}. Saved {best_model_path}")
 
             scheduler.step(val_aupr)
@@ -508,7 +573,7 @@ def run(args: argparse.Namespace):
         logger.info(f"Training completed. Loading best checkpoint from epoch {best_epoch} (Val AUPR: {best_val_aupr:.4f}) for final test evaluation...")
         test_loader.unlock()
         if os.path.exists(best_model_path):
-            model.load_state_dict(torch.load(best_model_path, map_location=device))
+            load_model_checkpoint(model, best_model_path, device)
         model.eval()
 
         y_true_t, y_scores_t = predicting_dti(model, test_loader)
@@ -542,6 +607,8 @@ def run(args: argparse.Namespace):
 
 
 def parse_args(args=None):
+    if args is not None:
+        args = [str(a) for a in args]
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--root_data_path', type=str, default='./data', help='Raw Data Path')
@@ -591,6 +658,8 @@ def parse_args(args=None):
                         help='Validation fraction carved from training partition for non-Davis datasets (default: 0.1)')
     parser.add_argument('--output_dir', type=str, default='runs',
                         help='Base directory for run outputs (config, logs, checkpoints, final metrics)')
+    parser.add_argument('--gpus', type=str, default='all',
+                        help='GPUs to use: "all", comma-separated IDs like "0,1,2,3", single ID like "0", or "cpu"')
     parser.add_argument('--strict', action='store_true', default=False,
                         help='Strict mode: raise error on invalid SMILES, missing structure files, or fallback data')
     parser.add_argument('--skip_pre_check', action='store_true', default=False,
