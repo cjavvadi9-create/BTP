@@ -108,16 +108,27 @@ class BiSSANet(torch.nn.Module):
         self.protein_seq_attn = LinearAttention(self.protein_dim, self.linears_hidden_dim, self.linear_heads)
         self.protein_graph_attn = LinearAttention(self.protein_dim, self.linears_hidden_dim, self.linear_heads)
 
-        # ── Transformer Sequence Encoders ────────────────────────────────
-        self.encoder_layer = nn.TransformerEncoderLayer(
-            d_model=self.compound_text_dim, dim_feedforward=self.feedforward_dim, nhead=self.encoder_heads
+        # ── Transformer Sequence Encoders (1 layer, 4 heads, FFN 1024, dropout 0.2, Post-LN) ──
+        # Build template layers as local variables to avoid registering unused ghost parameters (A-1, A-2)
+        enc_layer1 = nn.TransformerEncoderLayer(
+            d_model=self.compound_text_dim,
+            dim_feedforward=self.feedforward_dim,
+            nhead=self.encoder_heads,
+            dropout=self.dropout,
+            batch_first=True,
+            norm_first=False,  # Post-LN per paper Section III-D
         )
-        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=self.encoder_layers)
+        self.transformer_encoder = nn.TransformerEncoder(enc_layer1, num_layers=self.encoder_layers)
 
-        self.encoder_layer2 = nn.TransformerEncoderLayer(
-            d_model=self.protein_dim, dim_feedforward=self.feedforward_dim, nhead=self.encoder_heads
+        enc_layer2 = nn.TransformerEncoderLayer(
+            d_model=self.protein_dim,
+            dim_feedforward=self.feedforward_dim,
+            nhead=self.encoder_heads,
+            dropout=self.dropout,
+            batch_first=True,
+            norm_first=False,  # Post-LN per paper Section III-D
         )
-        self.transformer_encoder2 = nn.TransformerEncoder(self.encoder_layer2, num_layers=self.encoder_layers)
+        self.transformer_encoder2 = nn.TransformerEncoder(enc_layer2, num_layers=self.encoder_layers)
 
         # ── Projections & Layer Norms ────────────────────────────────────
         self.fc1 = nn.Linear(self.compound_structure_dim, self.compound_text_dim)
@@ -194,6 +205,8 @@ class BiSSANet(torch.nn.Module):
         # -----------------------------------------------------------
         # Drug Branch
         # -----------------------------------------------------------
+        drug_seq_pad_mask = torch.arange(compound_smiles_max_len, device=target_device).unsqueeze(0) >= data["COMPOUND_SMILES_LENGTH"].to(target_device).unsqueeze(1)
+
         node_mask, smiles_mask = self.make_masks(
             data["COMPOUND_NODE_NUM"],
             data["COMPOUND_SMILES_LENGTH"],
@@ -204,7 +217,7 @@ class BiSSANet(torch.nn.Module):
         compound_struc = self.drug_gcn(compound_x, compound_adj)
         xd_f1 = self.drug_struct_ln(self.fc1(compound_struc))
 
-        compound_smiles = self.transformer_encoder(self.fc3(compound_emb))
+        compound_smiles = self.transformer_encoder(self.fc3(compound_emb), src_key_padding_mask=drug_seq_pad_mask)
         xd_f2 = self.drug_ln(compound_smiles)
 
         # Path 1 (S_d <- G_d): SMILES features query graph features
@@ -220,10 +233,13 @@ class BiSSANet(torch.nn.Module):
         # -----------------------------------------------------------
         # Protein Branch
         # -----------------------------------------------------------
+        prot_seq_max_len = target_emb.shape[1]
+        prot_seq_pad_mask = torch.arange(prot_seq_max_len, device=target_device).unsqueeze(0) >= data["PROTEIN_NODE_NUM"].to(target_device).unsqueeze(1)
+
         protein_struc = self.protein_gcn(protein_x, protein_adj)
         xt_f1 = self.protein_struct_ln(self.fc4(protein_struc))
 
-        seq_emb = self.transformer_encoder2(self.fc2(target_emb))
+        seq_emb = self.transformer_encoder2(self.fc2(target_emb), src_key_padding_mask=prot_seq_pad_mask)
         xt_f2 = self.target_ln(seq_emb)
 
         protein_seq_mask, protein_struct_mask = self.make_masks(
