@@ -1,0 +1,143 @@
+{
+  "dataset": "davis",
+  "seed": 0,
+  "pkd_formula": "-log10(Kd / 1e9)",
+  "pkd_range": [
+    5.0,
+    10.79588002
+  ],
+  "total_dataset_pairs": 30056,
+  "total_unique_drugs": 68,
+  "total_unique_targets": 379,
+  "total_unique_target_ids": 442,
+  "splits": {
+    "random": {
+      "pairs": {
+        "train": 24044,
+        "valid": 3006,
+        "test": 3006,
+        "total_retained": 30056,
+        "discarded": 0
+      },
+      "drugs": {
+        "train": 68,
+        "valid": 68,
+        "test": 68
+      },
+      "targets": {
+        "train": 379,
+        "valid": 379,
+        "test": 379
+      },
+      "target_ids": {
+        "train": 442,
+        "valid": 442,
+        "test": 442
+      },
+      "overlap": {
+        "drug_train_test": 68,
+        "drug_train_val": 68,
+        "drug_val_test": 68,
+        "target_train_test": 379,
+        "target_train_val": 379,
+        "target_val_test": 379
+      }
+    },
+    "cold_drug": {
+      "pairs": {
+        "train": 23868,
+        "valid": 3094,
+        "test": 3094,
+        "total_retained": 30056,
+        "discarded": 0
+      },
+      "drugs": {
+        "train": 54,
+        "valid": 7,
+        "test": 7
+      },
+      "targets": {
+        "train": 379,
+        "valid": 379,
+        "test": 379
+      },
+      "target_ids": {
+        "train": 442,
+        "valid": 442,
+        "test": 442
+      },
+      "overlap": {
+        "drug_train_test": 0,
+        "drug_train_val": 0,
+        "drug_val_test": 0,
+        "target_train_test": 379,
+        "target_train_val": 379,
+        "target_val_test": 379
+      }
+    },
+    "cold_target": {
+      "pairs": {
+        "train": 24820,
+        "valid": 2652,
+        "test": 2584,
+        "total_retained": 30056,
+        "discarded": 0
+      },
+      "drugs": {
+        "train": 68,
+        "valid": 68,
+        "test": 68
+      },
+      "targets": {
+        "train": 303,
+        "valid": 38,
+        "test": 38
+      },
+      "target_ids": {
+        "train": 365,
+        "valid": 39,
+        "test": 38
+      },
+      "overlap": {
+        "drug_train_test": 68,
+        "drug_train_val": 68,
+        "drug_val_test": 68,
+        "target_train_test": 0,
+        "target_train_val": 0,
+        "target_val_test": 0
+      }
+    },
+    "cold_pair": {
+      "pairs": {
+        "train": 19332,
+        "valid": 322,
+        "test": 266,
+        "total_retained": 19920,
+        "discarded": 10136
+      },
+      "drugs": {
+        "train": 54,
+        "valid": 7,
+        "test": 7
+      },
+      "targets": {
+        "train": 303,
+        "valid": 38,
+        "test": 38
+      },
+      "target_ids": {
+        "train": 358,
+        "valid": 46,
+        "test": 38
+      },
+      "overlap": {
+        "drug_train_test": 0,
+        "drug_train_val": 0,
+        "drug_val_test": 0,
+        "target_train_test": 0,
+        "target_train_val": 0,
+        "target_val_test": 0
+      }
+    }
+  }
+}

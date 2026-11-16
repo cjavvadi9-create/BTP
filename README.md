@@ -1,8 +1,8 @@
 # BiSSA: Bidirectional Sequence–Structure Attention for Drug–Target Interaction and Affinity Prediction
 
 [![Paper](https://img.shields.io/badge/Paper-PDF-blue)](#)
-[![Python 3.7+](https://img.shields.io/badge/Python-3.7%2B-green)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-1.4%2B-red)](https://pytorch.org/)
+[![Python 3.10](https://img.shields.io/badge/Python-3.10-green)](https://www.python.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.0%2B-red)](https://pytorch.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](#)
 
 > Official implementation of **"Bidirectional Sequence–Structure Attention for Drug–Target Interaction and Affinity Prediction"**
@@ -23,184 +23,179 @@ Within both the drug and protein decoders, two parallel multi-head cross-attenti
 - **Sequence → Graph** path: sequence features attend to graph features (*S* ← *G*)
 - **Graph → Sequence** path: graph features attend to sequence features (*G* ← *S*)
 
-Each path is followed by 1D convolutional refinement and residual connections. Four multi-head linear attention readout modules aggregate the resulting representations into a **512-dimensional joint embedding** for binary interaction classification or continuous affinity regression.
+Each path is followed by 1D convolutional refinement and residual connections per Eq. (6). Four multi-head linear attention readout modules aggregate the resulting representations into a **512-dimensional joint embedding** for binary interaction classification or continuous affinity regression.
 
 ```
                     ┌──────────────────────────────────────┐
-                    │         Drug Branch Decoder           │
+                    │         Drug Branch Decoder          │
   ChemBERTa-2 ──▶  │  S_d ← G_d  (sequence-queried)      │
   Drug Graph   ──▶  │  G_d ← S_d  (graph-queried)         │
-                    │  + 1D Conv refinement + residual      │
+                    │  + 1D Conv refinement + residual     │
                     └────────────┬─────────────────────────┘
                                  │
                     ┌────────────▼─────────────────────────┐
-                    │    4× Linear Attention Readout        │
-                    │    → 512-dim joint embedding z        │
+                    │    4× Linear Attention Readout       │
+                    │    → 512-dim joint embedding z       │
                     │    → FC MLP → ŷ (DTA / DTI)          │
                     └────────────▲─────────────────────────┘
                                  │
                     ┌────────────┴─────────────────────────┐
-                    │       Protein Branch Decoder          │
+                    │       Protein Branch Decoder         │
   ESM-2       ──▶   │  S_p ← G_p  (sequence-queried)      │
   AlphaFold   ──▶   │  G_p ← S_p  (graph-queried)         │
-  Contact Graph     │  + 1D Conv refinement + residual      │
+  Contact Graph     │  + 1D Conv refinement + residual     │
                     └──────────────────────────────────────┘
 ```
 
 ---
 
-## Results
+## Environment & Requirements
 
-### DTA Regression (Davis, Random 80/10/10 Split)
+- **Paper Specification:** Python 3.10
+- Core dependencies:
+  - `torch >= 2.0.0`
+  - `transformers >= 4.35.2` (DeepChem/ChemBERTa-77M-MLM)
+  - `fair-esm >= 2.0.0` (esm2_t12_35M_UR50D)
+  - `rdkit >= 2023.09.2`
+  - `biopython >= 1.79`
+  - `requests >= 2.28.0`
+  - `scikit-learn >= 1.0.0`
+  - `pandas >= 1.3.0`, `numpy >= 1.21.0`, `scipy >= 1.7.0`
 
-| Model | MSE ↓ | RMSE ↓ | CI ↑ | Pearson *r* ↑ |
-|:---|:---:|:---:|:---:|:---:|
-| DeepDTA | 0.261 | 0.511 | 0.878 | 0.806 |
-| GraphDTA | 0.229 | 0.478 | 0.893 | 0.824 |
-| DGraphDTA | 0.204 | 0.452 | 0.904 | 0.838 |
-| MGraphDTA | 0.207 | 0.455 | 0.900 | 0.841 |
-| **BiSSA (Ours)** | **0.181** | **0.426** | **0.912** | **0.862** |
-
-### DTA Regression (PDBbind v2016)
-
-| Model | MSE ↓ | RMSE ↓ | CI ↑ | Pearson *r* ↑ |
-|:---|:---:|:---:|:---:|:---:|
-| GraphDTA | 1.855 | 1.362 | 0.782 | 0.754 |
-| DGraphDTA | 1.727 | 1.314 | 0.794 | 0.772 |
-| **BiSSA (Ours)** | **1.508** | **1.228** | **0.821** | **0.811** |
-
-### Cold-Target Generalization (Davis)
-
-| Model | MSE ↓ | CI ↑ | Pearson *r* ↑ |
-|:---|:---:|:---:|:---:|
-| GraphDTA | 0.456 | 0.785 | 0.624 |
-| **BiSSA (Ours)** | **0.338** | **0.848** | **0.738** |
-
-### DTI Classification (BindingDB)
-
-| Model | AUROC ↑ | AUPR ↑ | F1 ↑ | Accuracy ↑ |
-|:---|:---:|:---:|:---:|:---:|
-| DrugBAN | 0.946 | 0.932 | 0.874 | 0.882 |
-| **BiSSA (Ours)** | **0.963** | **0.956** | **0.902** | **0.908** |
-
-> Complete benchmark tables including TDC-DG temporal splits, all cold-start protocols, and ablation studies are available in [`results_report.md`](results_report.md) and [`benchmark_results.csv`](benchmark_results.csv).
-
----
-
-## Repository Structure
-
-```
-BiSSA/
-├── models/
-│   ├── core.py              # Main BiSSA model architecture
-│   ├── decoder.py           # Bidirectional cross-attention decoders
-│   └── gnn.py               # GCN encoders for drug and protein graphs
-├── preprocessing/
-│   └── protein_pretrain/     # ESM-2 protein feature extraction
-│   └── compound_pretrain.py  # ChemBERTa-2 drug feature extraction
-├── data/
-│   ├── davis/                # Davis kinase benchmark
-│   ├── pdb/                  # PDBbind v2016 benchmark
-│   └── bindingdb/            # BindingDB DTI classification benchmark
-├── data.py                   # Dataset loading and graph construction
-├── main.py                   # Training & evaluation entry point
-├── utils.py                  # Metrics (CI, MSE, RMSE, Pearson, etc.)
-├── benchmark_results.csv     # All paper benchmark results (machine-readable)
-└── results_report.md         # Detailed results report with tables
+Install dependencies via:
+```bash
+pip install -r requirements.txt
 ```
 
 ---
 
-## Requirements
+## Preprocessing Workflow
 
+Preprocessing extracts frozen embeddings and constructs contact graphs offline.
+
+### 1. Drug Sequence Embeddings (ChemBERTa-2, 384-d)
+Extracts offline embeddings with [CLS]/[SEP] stripped and saves to `data/<dataset>/compound/mol_dict.pkl`:
+```bash
+python preprocessing/compound_pretrain.py --root_data_path data --dataset davis
+python preprocessing/compound_pretrain.py --root_data_path data --dataset pdb
+python preprocessing/compound_pretrain.py --root_data_path data --dataset tdc_dg
+python preprocessing/compound_pretrain.py --root_data_path data --dataset bindingdb
 ```
-python >= 3.7
-pytorch >= 1.4.0
-cudatoolkit >= 10.1
-numpy >= 1.16.4
-scikit-learn >= 0.21.2
-pandas >= 0.24.2
-scipy >= 1.3.0
-rdkit >= 2023.09.2
-esm == 2.0.0
-transformers >= 4.35.2
+
+### 2. Protein Sequence Embeddings (ESM-2 Layer 12, 480-d)
+Extracts per-residue representations with BOS/EOS stripped, truncated to $N_p = \min(L, 1022)$, and saves `.npy` files to `data/<dataset>/protein/`:
+```bash
+# Regression benchmarks (Davis, PDBbind, TDC-DG)
+python preprocessing/protein_pretrain/protein_dta.py --root_data_path data --dataset davis
+python preprocessing/protein_pretrain/protein_dta.py --root_data_path data --dataset pdb
+python preprocessing/protein_pretrain/protein_dta.py --root_data_path data --dataset tdc_dg
+
+# Classification benchmark (BindingDB)
+python preprocessing/protein_pretrain/protein_dti.py --root_data_path data --dataset bindingdb
+```
+
+### 3. Protein Contact Graphs (AlphaFold v4 / RCSB)
+Fetches coordinates from AlphaFold DB v4 (UniProt) or RCSB PDB (4-letter code), extracts $C\alpha$ coordinates, and computes the binary contact adjacency at $< 8.0$ Å threshold with self-loops. Generates 22-d node features (21-d AA one-hot + normalized confidence/pLDDT) and writes `data/<dataset>/graph_coverage.json`:
+```bash
+python preprocessing/protein_pretrain/protein_structure.py --root_data_path data --dataset davis
+python preprocessing/protein_pretrain/protein_structure.py --root_data_path data --dataset pdb
+python preprocessing/protein_pretrain/protein_structure.py --root_data_path data --dataset tdc_dg
+python preprocessing/protein_pretrain/protein_structure.py --root_data_path data --dataset bindingdb
 ```
 
 ---
 
-## Data Preprocessing
+## Reproducing the Paper
 
-### Protein Features (ESM-2)
+All runs use global seed 0, Adam optimizer ($10^{-3}$), batch size 128, dropout 0.2, and maximum 200 epochs with `ReduceLROnPlateau` (patience 30, factor 0.1).
 
-For **regression** benchmarks (Davis, PDBbind):
-```bash
-cd preprocessing/protein_pretrain
-python protein_dta.py --dataset davis   # or --dataset pdb
+Runs write strictly into timestamped directories under `runs/`:
+```
+runs/<dataset>_<split>_<variant>_<timestamp>/
+├── config.json               # Complete effective arguments + git commit hash
+├── split_stats.json          # Exact dataset split counts and entity isolation stats
+├── train.log                 # Per-epoch training loss, validation metrics, and LR
+├── best_model.pth            # Checkpoint selected strictly on best validation metric
+└── final_test_metrics.json   # Final evaluation on test partition (evaluated once)
 ```
 
-For **classification** benchmarks (BindingDB):
-```bash
-cd preprocessing/protein_pretrain
-python protein_dti.py --dataset bindingdb
-```
+> **Note on Published Artifacts:** `benchmark_results.csv` and `results_report.md` preserve the published historical reference numbers and are never hand-written or overwritten by training runs.
 
-### Drug Features (ChemBERTa-2)
-```bash
-cd preprocessing
-python compound_pretrain.py --dataset davis   # or pdb, bindingdb
-```
+### Table I — DTA Benchmarks (Random Splits)
 
-### Protein Contact Graphs (AlphaFold / RCSB)
+| Benchmark | Table Cell | Exact Command |
+|:---|:---|:---|
+| Davis (DTA) | Full Proposed (BiSSA) | `python main.py --dataset davis --task dta --split random --variant full --batch_size 128 --max_epochs 200 --seed 0` |
+| Davis (DTA) | Ablation A1 (Graph-Only) | `python main.py --dataset davis --task dta --split random --variant A1 --batch_size 128 --max_epochs 200 --seed 0` |
+| Davis (DTA) | Ablation A2 (Seq-Only) | `python main.py --dataset davis --task dta --split random --variant A2 --batch_size 128 --max_epochs 200 --seed 0` |
+| Davis (DTA) | Ablation A3 (w/o Prot Graph) | `python main.py --dataset davis --task dta --split random --variant A3 --batch_size 128 --max_epochs 200 --seed 0` |
+| Davis (DTA) | Ablation A4 (Concat) | `python main.py --dataset davis --task dta --split random --variant A4 --batch_size 128 --max_epochs 200 --seed 0` |
+| Davis (DTA) | Ablation A5 ($S \leftarrow G$) | `python main.py --dataset davis --task dta --split random --variant A5 --batch_size 128 --max_epochs 200 --seed 0` |
+| Davis (DTA) | Ablation A6 ($G \leftarrow S$) | `python main.py --dataset davis --task dta --split random --variant A6 --batch_size 128 --max_epochs 200 --seed 0` |
+| PDBbind (DTA) | Full Proposed | `python main.py --dataset pdbbind --task dta --variant full --batch_size 128 --max_epochs 200 --seed 0` |
+| TDC-DG (DTA) | Full Proposed | `python main.py --dataset tdc_dg --task dta --variant full --batch_size 128 --max_epochs 200 --seed 0` |
 
-Residue contact graphs are constructed using a **Cα distance threshold of 8.0 Å** from AlphaFold v4 predicted structures (Davis, TDC-DG, BindingDB) or RCSB PDB experimental coordinates (PDBbind v2016). Each residue node carries a 22-dimensional feature vector (20 amino acid one-hot + normalized position + pLDDT confidence).
+### Table II — Davis Generalization (Cold Splits)
+
+| Setting | Table Cell | Exact Command |
+|:---|:---|:---|
+| Davis Cold Target | Full Proposed | `python main.py --dataset davis --task dta --split cold_target --variant full --batch_size 128 --max_epochs 200 --seed 0` |
+| Davis Cold Target | Ablations A1–A6 | `python main.py --dataset davis --task dta --split cold_target --variant {A1,A2,A3,A4,A5,A6} --batch_size 128 --max_epochs 200 --seed 0` |
+| Davis Cold Drug | Full Proposed | `python main.py --dataset davis --task dta --split cold_drug --variant full --batch_size 128 --max_epochs 200 --seed 0` |
+| Davis Cold Pair | Full Proposed | `python main.py --dataset davis --task dta --split cold_pair --variant full --batch_size 128 --max_epochs 200 --seed 0` |
+
+### Table IV — BindingDB DTI Classification
+
+| Setting | Table Cell | Exact Command |
+|:---|:---|:---|
+| BindingDB DTI | Full Proposed | `python main.py --dataset bindingdb --task dti --variant full --batch_size 128 --max_epochs 200 --seed 0` |
+| BindingDB DTI | Ablation A1 (Graph-Only) | `python main.py --dataset bindingdb --task dti --variant A1 --batch_size 128 --max_epochs 200 --seed 0` |
+| BindingDB DTI | Ablation A2 (Seq-Only) | `python main.py --dataset bindingdb --task dti --variant A2 --batch_size 128 --max_epochs 200 --seed 0` |
+| BindingDB DTI | Ablation A3 (w/o Prot Graph) | `python main.py --dataset bindingdb --task dti --variant A3 --batch_size 128 --max_epochs 200 --seed 0` |
+| BindingDB DTI | Ablation A4 (Concat) | `python main.py --dataset bindingdb --task dti --variant A4 --batch_size 128 --max_epochs 200 --seed 0` |
+| BindingDB DTI | Ablation A5 ($S \leftarrow G$) | `python main.py --dataset bindingdb --task dti --variant A5 --batch_size 128 --max_epochs 200 --seed 0` |
+| BindingDB DTI | Ablation A6 ($G \leftarrow S$) | `python main.py --dataset bindingdb --task dti --variant A6 --batch_size 128 --max_epochs 200 --seed 0` |
 
 ---
 
-## Training & Evaluation
+## Batch Scripts
 
-### DTA Regression
-```bash
-# Davis benchmark
-python main.py --objective regression --dataset davis --batch_size 128 --max_epochs 200 --learning_rate 0.001
-
-# PDBbind v2016
-python main.py --objective regression --dataset pdb --batch_size 128 --max_epochs 200 --learning_rate 0.001
-```
-
-### DTI Classification
-```bash
-# BindingDB benchmark
-python main.py --objective classification --dataset bindingdb --batch_size 64 --max_epochs 500 --learning_rate 0.001
-```
-
-### Output Format
-
-**Regression** results are saved to `result_davis.csv` / `result_pdb.csv`:
-```
-<epoch>,<rmse>,<mae>,<mse>,<pearson>,<spearman>,<ci>
-```
-
-**Classification** results are saved to `result_bindingdb_{seed}.csv`:
-```
-<epoch>,<accuracy>,<aupr>,<auroc>,<f1>
-```
+- **Full Benchmark Suite:**
+  - PowerShell (Windows): `.\run_all.ps1`
+  - Bash (Linux/macOS): `./run_all.sh`
+- **Fast Smoke / Verification Suite:**
+  - PowerShell (Windows): `.\run_smoke.ps1`
+  - Bash (Linux/macOS): `./run_smoke.sh`
 
 ---
 
-## Benchmarks
+## Multi-GPU & Hardware Acceleration
 
-| Dataset | Task | # Train Pairs | # Test Pairs | Unique Drugs | Unique Proteins |
-|:---|:---|:---:|:---:|:---:|:---:|
-| Davis | DTA Regression | 24,046 | 3,005 | 68 | 442 |
-| PDBbind v2016 | DTA Regression | 7,512 | 207 | 6,527 | 5,352 |
-| TDC-DG | DTA (Temporal) | 82,096 | 48,992 | 94,742 | 554 |
-| BindingDB | DTI Classification | 12,657 | 13,272 | 7,108 | 2,000 |
+The model supports multi-GPU training via PyTorch `DataParallel`.
+```bash
+# Use all visible GPUs
+python main.py --dataset davis --gpus all
+
+# Use specific GPUs
+python main.py --dataset davis --gpus 0,1,2,3
+
+# Force CPU
+python main.py --dataset davis --gpus cpu
+```
+
+Checkpoints automatically unwrap the module prefix so saved models load seamlessly across single-GPU, multi-GPU, and CPU environments.
+
+---
+
+## Verification & Audit Tools
+
+- **Architecture Audit:** `python verify_architecture.py` verifies all tensor dimensions, parameter counts (2.42M DTI / 2.95M DTA), post-LN encoders, and Eq. (6) projected query residuals.
+- **Protocol Audit:** `python verify_protocol.py` verifies split isolation, test-set locking, metrics unit tests, and smoke execution.
+- **Leakage Audit:** `python leakage_report.py` audits duplicate pairs and label conflicts across datasets and generates `leakage_report.json`.
 
 ---
 
 ## Citation
-
-If you find this work useful, please cite:
 
 ```bibtex
 @article{thati2026bissa,
@@ -210,9 +205,3 @@ If you find this work useful, please cite:
   institution={Indian Institute of Information Technology, Sri City}
 }
 ```
-
----
-
-## Acknowledgments
-
-This work builds upon the [PMMR](https://github.com/) framework and extends it with bidirectional cross-attention decoders and AlphaFold-derived protein contact graphs. We gratefully acknowledge the developers of ESM-2, ChemBERTa-2, AlphaFold, and RDKit.

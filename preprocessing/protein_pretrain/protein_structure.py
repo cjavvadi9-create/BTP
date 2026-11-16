@@ -5,11 +5,17 @@ import os
 import os.path
 import logging
 import argparse
+import json
 
 import numpy as np
 import pandas as pd
 import requests
-from Bio import PDB
+try:
+    from Bio import PDB
+    BIOPYTHON_AVAILABLE = True
+except (ImportError, Exception) as e:
+    PDB = None
+    BIOPYTHON_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +172,8 @@ def parse_ca_coordinates(pdb_path, target_seq_len=None):
     ca_coords : np.ndarray, shape (L, 3)
     bfactors  : np.ndarray, shape (L,)
     """
+    if not BIOPYTHON_AVAILABLE or PDB is None:
+        raise RuntimeError("Bio.PDB is unavailable. Please install biopython (`pip install biopython>=1.79`).")
     parser = PDB.PDBParser(QUIET=True)
     structure = parser.get_structure("protein", pdb_path)
     model = next(structure.get_models())
@@ -254,8 +262,8 @@ def _looks_like_pdb_code(target_id):
     return len(target_id) == 4 and target_id.isalnum()
 
 
-def get_protein_structure_features(target_id, sequence, cache_dir):
-    """Fetch structure (RCSB or AlphaFold) and return (node_features, adjacency).
+def get_protein_structure_features(target_id, sequence, cache_dir, strict=False):
+    """Fetch structure (RCSB or AlphaFold) and return (node_features, adjacency), fell_back, reason.
 
     Strategy:
     1. If target_id looks like a PDB code (4 chars), try RCSB PDB first.
@@ -265,17 +273,21 @@ def get_protein_structure_features(target_id, sequence, cache_dir):
     3. Falls back gracefully when no structure is available:
        - adjacency  -> identity matrix (self-loops only)
        - confidence -> 0 for every residue
+       Under strict=True, raises RuntimeError.
 
     Parameters
     ----------
     target_id : str, PDB code or UniProt accession
     sequence  : str, amino-acid sequence of length L
     cache_dir : str, directory for caching downloaded PDB files
+    strict    : bool, whether to raise on missing / unparseable structures
 
     Returns
     -------
     node_features : np.ndarray, shape (L, 22)
     adjacency     : np.ndarray, shape (L, L)
+    fell_back     : bool
+    reason        : str or None
     """
     L = len(sequence)
     pdb_path = None
@@ -293,27 +305,27 @@ def get_protein_structure_features(target_id, sequence, cache_dir):
 
     # --- Fallback: no structure available ---
     if pdb_path is None:
-        print(
-            f"[WARNING] No structure found for target_id={target_id}. "
-            "Using identity adjacency and zero confidence."
-        )
+        reason = f"No structure found for target_id={target_id} (RCSB/AlphaFold download failed or 404)"
+        if strict:
+            raise RuntimeError(f"Protein structure unavailable for target_id={target_id} under --strict ({reason})")
+        logger.warning(f"[FALLBACK] {reason}. Using identity adjacency and zero confidence.")
         conf_scores = np.zeros(L, dtype=np.float32)
         node_features = residue_features(sequence, conf_scores)
         adjacency = np.eye(L, dtype=np.float32)
-        return node_features, adjacency
+        return node_features, adjacency, True, reason
 
     # --- Parse structure ---
     try:
         ca_coords, raw_scores = parse_ca_coordinates(pdb_path, target_seq_len=L)
     except Exception as e:
-        print(
-            f"[WARNING] Failed to parse PDB for target_id={target_id}: {e}. "
-            "Using identity adjacency and zero confidence."
-        )
+        reason = f"Failed to parse PDB structure for target_id={target_id}: {e}"
+        if strict:
+            raise RuntimeError(f"{reason} under --strict") from e
+        logger.warning(f"[FALLBACK] {reason}. Using identity adjacency and zero confidence.")
         conf_scores = np.zeros(L, dtype=np.float32)
         node_features = residue_features(sequence, conf_scores)
         adjacency = np.eye(L, dtype=np.float32)
-        return node_features, adjacency
+        return node_features, adjacency, True, reason
 
     # For experimental structures, B-factors ≠ pLDDT; use fixed confidence.
     if is_experimental:
@@ -343,7 +355,7 @@ def get_protein_structure_features(target_id, sequence, cache_dir):
     node_features = residue_features(sequence, conf_scores)
     adjacency = build_contact_graph(ca_coords)
 
-    return node_features, adjacency
+    return node_features, adjacency, False, None
 
 
 # ---------------------------------------------------------------------------
@@ -354,20 +366,26 @@ def generate_feature(args):
 
     data_path = args.root_data_path
     dataset = args.dataset
-    # BUG FIX: output path must be protein/structure/ to match data.py which
-    # loads from {protein_data_path}/structure/{id}_node.npy
+    strict = getattr(args, 'strict', False)
+
     output_data_path = os.path.join(data_path, dataset, 'protein', 'structure') + os.sep
     cache_dir = os.path.join(data_path, dataset, 'pdb_cache')
 
-    if not os.path.exists(output_data_path):
-        os.makedirs(output_data_path)
-        print(f"{output_data_path} created")
-    else:
-        print(f"{output_data_path} exists")
+    os.makedirs(output_data_path, exist_ok=True)
+    print(f"{output_data_path} ready")
 
     opt = ['train', 'test']
 
     id_list = []
+    coverage_stats = {
+        'dataset': dataset,
+        'total_proteins': 0,
+        'resolved': 0,
+        'fell_back': 0,
+        'fallback_rate': 0.0,
+        'fallbacks': [],
+    }
+
     count = 0
 
     for t in opt:
@@ -375,6 +393,11 @@ def generate_feature(args):
             raw_data = pd.read_csv(f'{data_path}/{dataset}.csv')
         else:
             raw_data = pd.read_csv(f'{data_path}/{dataset}_{t}.csv')
+
+        t_struct_path = None
+        if dataset == 'bindingdb':
+            t_struct_path = os.path.join(data_path, dataset, 'protein', t, 'structure') + os.sep
+            os.makedirs(t_struct_path, exist_ok=True)
 
         sequence_values = raw_data['target_sequence'].values
         for i, s in enumerate(sequence_values):
@@ -387,26 +410,57 @@ def generate_feature(args):
 
             if os.path.isfile(node_out) and os.path.isfile(adj_out):
                 id_list.append(target_id)
+                # If bindingdb, ensure split path has it as well
+                if t_struct_path is not None:
+                    t_node = f'{t_struct_path}{target_id}_node.npy'
+                    t_adj = f'{t_struct_path}{target_id}_adj.npy'
+                    if not (os.path.isfile(t_node) and os.path.isfile(t_adj)):
+                        np.save(t_node, np.load(node_out))
+                        np.save(t_adj, np.load(adj_out))
                 continue
 
-            node_features, adjacency = get_protein_structure_features(
-                target_id, s, cache_dir
+            node_features, adjacency, fell_back, reason = get_protein_structure_features(
+                target_id, s, cache_dir, strict=strict
             )
 
             np.save(node_out, node_features)
             np.save(adj_out, adjacency)
-            print(f"[{count+1}] {target_id}  node={node_features.shape}  adj={adjacency.shape}")
+
+            if t_struct_path is not None:
+                np.save(f'{t_struct_path}{target_id}_node.npy', node_features)
+                np.save(f'{t_struct_path}{target_id}_adj.npy', adjacency)
+
+            if fell_back:
+                coverage_stats['fallbacks'].append({'target_id': target_id, 'reason': reason})
+
+            print(f"[{count+1}] {target_id}  node={node_features.shape}  adj={adjacency.shape}{' (FALLBACK)' if fell_back else ''}")
 
             id_list.append(target_id)
             count += 1
 
+    total = len(id_list)
+    fell_back_count = len(coverage_stats['fallbacks'])
+    resolved_count = total - fell_back_count
+    fallback_rate = float(fell_back_count / total) if total > 0 else 0.0
+
+    coverage_stats['total_proteins'] = total
+    coverage_stats['resolved'] = resolved_count
+    coverage_stats['fell_back'] = fell_back_count
+    coverage_stats['fallback_rate'] = fallback_rate
+
+    coverage_json_path = os.path.join(data_path, dataset, 'graph_coverage.json')
+    with open(coverage_json_path, 'w') as f:
+        json.dump(coverage_stats, f, indent=2)
+
     print(f"\nDone — generated structure features for {count} proteins.")
+    print(f"Coverage saved to {coverage_json_path}: {resolved_count}/{total} resolved, {fell_back_count} fell back ({fallback_rate:.1%}).")
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--root_data_path', type=str, default='../../data', help='Raw Data Path')
     parser.add_argument('--dataset', type=str, default='davis', help='Datasets')
+    parser.add_argument('--strict', action='store_true', default=False, help='Raise on missing/unparseable structures')
     return parser.parse_args()
 
 

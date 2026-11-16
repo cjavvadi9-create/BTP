@@ -23,7 +23,7 @@ class SelfAttention(nn.Module):
         self.do = nn.Dropout(dropout)
         self.scale = math.sqrt(hid_dim // n_heads)
 
-    def forward(self, query, key, value, mask=None):
+    def forward(self, query, key, value, mask=None, return_q_proj=False):
         # query = [batch_size, len_Q, hid_dim]
         # key   = [batch_size, len_K, hid_dim]
         # value = [batch_size, len_K, hid_dim]
@@ -31,13 +31,13 @@ class SelfAttention(nn.Module):
         bsz = query.shape[0]
         device = query.device
 
-        Q = self.w_q(query)
+        Q_proj = self.w_q(query)  # Linearly projected queries: Q_s = S * W_{Q,s} or Q_g = G * W_{Q,g} (Eqs. 4-5)
         K = self.w_k(key)
         V = self.w_v(value)
         # Q = [batch_size, len_Q, hid_dim]
         # K, V = [batch_size, len_K, hid_dim]
 
-        Q = Q.view(bsz, -1, self.n_heads, self.hid_dim // self.n_heads).permute(0, 2, 1, 3)
+        Q = Q_proj.view(bsz, -1, self.n_heads, self.hid_dim // self.n_heads).permute(0, 2, 1, 3)
         K = K.view(bsz, -1, self.n_heads, self.hid_dim // self.n_heads).permute(0, 2, 1, 3)
         V = V.view(bsz, -1, self.n_heads, self.hid_dim // self.n_heads).permute(0, 2, 1, 3)
         # Q = [batch_size, n_heads, len_Q, hid_dim // n_heads]
@@ -62,6 +62,8 @@ class SelfAttention(nn.Module):
         x = self.fc(x)
         # x = [batch_size, len_Q, hid_dim]
 
+        if return_q_proj:
+            return x, Q_proj
         return x
 
 
@@ -96,30 +98,34 @@ class DecoderLayer(nn.Module):
     def __init__(self, hid_dim, n_heads, dropout):
         super().__init__()
 
-        self.ln_trg = nn.LayerNorm(hid_dim)
-        self.ln_src = nn.LayerNorm(hid_dim)
-        self.ln_ff = nn.LayerNorm(hid_dim)
+        # Self-attention residual LayerNorm (Paper Section III-E)
+        self.ln_sa = nn.LayerNorm(hid_dim)
+        # Eq. 6 residual LayerNorm (Paper Section III-E, Eq. 6)
+        self.ln_out = nn.LayerNorm(hid_dim)
+
         self.sa = SelfAttention(hid_dim, n_heads, dropout)
         self.ea = SelfAttention(hid_dim, n_heads, dropout)
         self.pf = PositionwiseFeedforward(hid_dim, hid_dim, dropout)
         self.do = nn.Dropout(dropout)
 
     def forward(self, trg, src, trg_mask=None, src_mask=None):
-        # trg = [batch_size, len_trg, hid_dim]  (Query source)
-        # src = [batch_size, len_src, hid_dim]  (Key/Value source)
+        # trg = [batch_size, len_trg, hid_dim]  (Query stream)
+        # src = [batch_size, len_src, hid_dim]  (Key/Value memory)
         # trg_mask = [batch_size, 1, 1, len_trg]
         # src_mask = [batch_size, 1, 1, len_src]
 
-        # Pre-Norm self-attention on trg with residual
-        _trg = self.ln_trg(trg)
-        trg = trg + self.do(self.sa(_trg, _trg, _trg, trg_mask))
+        # 1. Masked multi-head self-attention on query stream with residual + LayerNorm (Paper Section III-E)
+        sa_out = self.sa(trg, trg, trg, trg_mask)
+        trg = self.ln_sa(trg + self.do(sa_out))
 
-        # Pre-Norm cross-attention: trg queries src, with residual
-        _trg = self.ln_src(trg)
-        trg = trg + self.do(self.ea(_trg, src, src, src_mask))
+        # 2. Cross-attention: query stream attends to key/value memory (Paper Eqs. 3-5)
+        # ea exposes projected query Q_s = S * W_{Q,s} (or Q_g = G * W_{Q,g}) and attention output H
+        H, Q_proj = self.ea(trg, src, src, src_mask, return_q_proj=True)
 
-        # Pre-Norm feedforward (1D CNN) with residual
-        _trg = self.ln_ff(trg)
-        trg = trg + self.do(self.pf(_trg))
+        # 3. 1D CNN refinement and residual addition with projected query Q, followed by LayerNorm (Paper Eq. 6)
+        # F_{s<-g} = LayerNorm(Q_s + CNN(H_{s<-g}))  [Paper Eq. 6]
+        # F_{g<-s} = LayerNorm(Q_g + CNN(H_{g<-s}))  [Paper Eq. 6]
+        h_cnn = self.pf(H)
+        out = self.ln_out(Q_proj + self.do(h_cnn))
 
-        return trg
+        return out

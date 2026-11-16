@@ -19,10 +19,16 @@ def _load_esm():
     global _esm_model, _esm_alphabet, _esm_converter
     if _esm_model is None:
         print("Loading ESM-2 model (esm2_t12_35M_UR50D)...")
-        _esm_model, _esm_alphabet = esm.pretrained.esm2_t12_35M_UR50D()
-        _esm_converter = _esm_alphabet.get_batch_converter()
-        _esm_model.eval()
-        print("ESM-2 model loaded.")
+        try:
+            _esm_model, _esm_alphabet = esm.pretrained.esm2_t12_35M_UR50D()
+            _esm_converter = _esm_alphabet.get_batch_converter()
+            _esm_model.eval()
+            print("ESM-2 model loaded.")
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load pretrained ESM-2 model 'esm2_t12_35M_UR50D': {e}. "
+                "Ensure fair-esm is installed and weights are present. Never fall back to random weights."
+            ) from e
     return _esm_model, _esm_alphabet, _esm_converter
 
 
