@@ -113,27 +113,33 @@ def davis_dataloader(seed=0, batch_size=256, workers=4, dataset = 'davis', data_
         collate_fn=data.collate_fn,
         shuffle=True,
         num_workers=workers,
+        worker_init_fn=seed_worker,
+        generator=torch.Generator().manual_seed(seed),
     )
 
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
         collate_fn=data.collate_fn,
-        shuffle=True,
+        shuffle=False,
         num_workers=workers,
+        worker_init_fn=seed_worker,
+        generator=torch.Generator().manual_seed(seed),
     )
 
     test_loader = DataLoader(
         test_dataset,
         batch_size=batch_size,
         collate_fn=data.collate_fn,
-        shuffle=True,
+        shuffle=False,
         num_workers=workers,
+        worker_init_fn=seed_worker,
+        generator=torch.Generator().manual_seed(seed),
     )
 
     return train_loader, val_loader, test_loader
 
-def others_dataloader(batch_size, workers, dataset = 'davis', data_path='./data'):
+def others_dataloader(batch_size, workers, dataset = 'davis', data_path='./data', seed=0):
     print('\nrunning on ', dataset)
 
     path = data_path + '/' + dataset
@@ -154,14 +160,18 @@ def others_dataloader(batch_size, workers, dataset = 'davis', data_path='./data'
         collate_fn=train_set.collate_fn,
         shuffle=True,
         num_workers=workers,
+        worker_init_fn=seed_worker,
+        generator=torch.Generator().manual_seed(seed),
     )
 
     test_loader = DataLoader(
         test_set,
         batch_size=batch_size,
         collate_fn=test_set.collate_fn,
-        shuffle=True,
+        shuffle=False,
         num_workers=workers,
+        worker_init_fn=seed_worker,
+        generator=torch.Generator().manual_seed(seed),
     )
 
     return train_loader, test_loader
@@ -273,7 +283,7 @@ def run(args: argparse.Namespace):
 
 
 
-def parse_args():
+def parse_args(args=None):
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--root_data_path', type=str, default='./data', help='Raw Data Path')
@@ -310,15 +320,14 @@ def parse_args():
     parser.add_argument('--variant', type=str, default='full',
                         choices=['full', 'A1', 'A2', 'A3', 'A4', 'A5', 'A6'],
                         help='Ablation variant: full (BiSSA), A1 (graph-only), A2 (sequence-only), A3 (w/o protein graph), A4 (concat w/o cross-attn), A5 (S<-G only), A6 (G<-S only)')
+    parser.add_argument('--output_dir', type=str, default='runs',
+                        help='Base directory for run outputs (config, logs, checkpoints, final metrics)')
 
-
-
-
-    return parser.parse_args()
+    return parser.parse_args(args)
 
 if __name__ == '__main__':
     params = parse_args()
     print(params)
-    torch.cuda.manual_seed_all(params.seed)
+    set_seed(params.seed)
     run(params)
 

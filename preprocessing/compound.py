@@ -1,15 +1,28 @@
 import numpy as np
-from rdkit import Chem
-from rdkit.Chem import Descriptors
-from rdkit.Chem.rdchem import BondType
+import logging
+
+try:
+    from rdkit import Chem
+    from rdkit.Chem import Descriptors
+    from rdkit.Chem.rdchem import BondType
+    from rdkit.Chem import AllChem, rdMolDescriptors
+    from rdkit import RDLogger
+    RDLogger.DisableLog('rdApp.*')
+    RDKIT_AVAILABLE = True
+    _RDKIT_IMPORT_ERROR = None
+except (ImportError, Exception) as e:
+    Chem = None
+    Descriptors = None
+    BondType = None
+    AllChem = None
+    rdMolDescriptors = None
+    RDLogger = None
+    RDKIT_AVAILABLE = False
+    _RDKIT_IMPORT_ERROR = str(e)
+
 import pickle
 import torch
-from rdkit.Chem import AllChem, rdMolDescriptors
-from rdkit import RDLogger
-RDLogger.DisableLog('rdApp.*')
-# from collections import defaultdict
-# from deepchem.feat import SmilesTokenizer
-from transformers import BertTokenizer, AutoTokenizer,BertModel,RobertaModel,RobertaTokenizer
+from transformers import BertTokenizer, AutoTokenizer, BertModel, RobertaModel, RobertaTokenizer
 import os
 
 def atom_features(atom):
