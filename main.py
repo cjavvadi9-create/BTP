@@ -416,7 +416,7 @@ def parse_args(args=None):
                         help='Objective (classification / regression)')
     parser.add_argument('--seed', type=int, default=0, help='Random Seed')
     parser.add_argument('--batch_size', type=int, default=128, help='Batch Size for Train(Validation/Test)')
-    parser.add_argument('--max_epochs', type=int, default=200, help='Max Training Epochs')
+    parser.add_argument('--epochs', '--max_epochs', dest='max_epochs', type=int, default=200, help='Max Training Epochs')
     parser.add_argument('--num_workers', type=int, default=4, help='Number of Subprocesses for Data Loading')
     parser.add_argument('--learning_rate', type=float, default=1e-3, help='Learning Rate for Trainning')
     parser.add_argument('--decoder_layers', type=int, default=2, help='Number of stacked DecoderLayer blocks in the drug and protein fusion decoders')
